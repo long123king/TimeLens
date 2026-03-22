@@ -10,7 +10,7 @@ GitHub README rendering may vary by client/browser. A direct video link is alway
 
 Inline player (works in many Markdown renderers that allow HTML video tags):
 
-<video src="demo/demo.mp4" controls muted width="960"></video>
+<video src="demo/demo.gif" controls muted width="960"></video>
 
 ## Current Status
 
