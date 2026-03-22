@@ -4,13 +4,13 @@ TimeLens is a PixiJS + Vite frontend for exploring live WinDbg extension data, w
 
 ## Demo
 
-GitHub README rendering may vary by client/browser. A direct video link is always supported:
+Preview (renders inline on GitHub):
 
-- [Watch demo video](demo/demo.gif)
+![TimeLens Demo](demo/demo.gif)
 
-Inline player (works in many Markdown renderers that allow HTML video tags):
+Open full GIF file:
 
-<video src="demo/demo.gif" controls muted width="960"></video>
+- [demo/demo.gif](demo/demo.gif)
 
 ## Current Status
 
