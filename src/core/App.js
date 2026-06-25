@@ -15,6 +15,10 @@ import EnvironmentView from '../components/EnvironmentView.js';
 import ModelView from '../components/ModelView.js';
 import PeView from '../components/PeView.js';
 import StringsView from '../components/StringsView.js';
+import MemAccessView from '../components/MemAccessView.js';
+import FlameGraphView from '../components/FlameGraphView.js';
+import QueueView from '../components/QueueView.js';
+import PositionView from '../components/PositionView.js';
 
 const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timelineHeight
 
@@ -25,7 +29,11 @@ const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timel
 export default class App {
   constructor(pixiApp) {
     this.pixiApp = pixiApp;
-    this.dataManager = new DataManager();
+    // API layer must be created before DataManager so callstack requests
+    // flow through the shared request queue
+    this.apiClient = new ApiClient();
+    this.connectionMonitor = new ConnectionMonitor(this.apiClient);
+    this.dataManager = new DataManager(this.apiClient);
     this.viewport = new Viewport(pixiApp);
 
     // Application state
@@ -52,10 +60,7 @@ export default class App {
     this.state.threads = [];       // array from /api/ttd/threads
     this.state.activeThreadId = null;
 
-     // API layer (initialised before initialize() awaits anything)
-     this.apiClient = new ApiClient();
-     this.connectionMonitor = new ConnectionMonitor(this.apiClient);
-     this.connectionPanel = null;   // set in initialize() once DOM is ready
+    this.connectionPanel = null;   // set in initialize() once DOM is ready
      this.notificationBar = null;   // set in initialize() once DOM is ready
     this.commandConsole = null;
     this.functionCallBrowser = null;
@@ -64,6 +69,11 @@ export default class App {
     this.modelView = null;
     this.peView = null;
     this.stringsView = null;
+    this.memaccessView = null;
+    this.flamegraphView = null;
+    this.queueView = null;
+    this.positionView = null;
+    this._threadLifetimes = new Map(); // threadId → { start, end }
     this.latestRegisters = null;
 
     // Components
@@ -122,6 +132,10 @@ export default class App {
         this.modelView?.setDisconnected();
         this.peView?.setDisconnected();
         this.stringsView?.setDisconnected();
+        this.memaccessView?.setDisconnected();
+        this.flamegraphView?.setDisconnected();
+        this.queueView?.setDisconnected();
+        this.positionView?.setDisconnected();
         if (this.state.traceInfo !== null) {
           this.notificationBar.show('dk server disconnected', 'warning');
         }
@@ -129,6 +143,7 @@ export default class App {
         this.state.timeBounds = null;
         this.state.modules = [];
         this.state.threads = [];
+        this._threadLifetimes = new Map();
         this.state.activeThreadId = null;
         this.state.selectedPeImageBase = '';
         this.state.currentPosition = null;
@@ -153,6 +168,8 @@ export default class App {
         const trace = response.trace ?? null;
         this.state.traceInfo = trace;
         this.connectionPanel.setConnected(serverData?.server, trace);
+        // Pass trace info to mem-access view for time range display
+        this.memaccessView?.setTraceInfo(trace);
 
         if (trace?.available && trace?.firstPos && trace?.lastPos) {
           this.state.timeBounds = { first: trace.firstPos, last: trace.lastPos };
@@ -178,6 +195,7 @@ export default class App {
       // Phase 2: fetch module lanes regardless of trace-info outcome
       this._fetchModules();
       this._fetchThreads();
+      this._fetchThreadLifetimes();
       this._fetchMemoryLayout();
       this._fetchEnvironment();
       this._refreshModelHome();
@@ -237,6 +255,30 @@ export default class App {
       this.setActiveTab('pe');
     }
 
+    _openMemAccessRange(startAddrHex, endAddrHex, mode = 'R') {
+      // Clamp to 32-byte max range
+      try {
+        const start = BigInt(startAddrHex);
+        const end = BigInt(endAddrHex);
+        if (end - start > 0x20n) {
+          endAddrHex = '0x' + (start + 0x20n).toString(16);
+        }
+      } catch { /* keep original values if parse fails */ }
+
+      this.setActiveTab('memaccess');
+      this.apiClient.drainQueue();
+      requestAnimationFrame(() => {
+        this.memaccessView?.acceptPrefill(startAddrHex, endAddrHex, mode);
+      });
+    }
+
+    async _openPosition(major, minor, threadId) {
+      this.setActiveTab('position');
+      // Wait briefly for the tab switch to render the component
+      await new Promise(r => requestAnimationFrame(r));
+      this.positionView?.load(major, minor, threadId);
+    }
+
     async _fetchThreads() {
       try {
         const response = await this.apiClient.getThreads();
@@ -251,6 +293,29 @@ export default class App {
         }
       } catch (err) {
         this.notificationBar.show(`Thread data unavailable: ${err.message}`, 'warning');
+      }
+    }
+
+    async _fetchThreadLifetimes() {
+      try {
+        const response = await this.apiClient.getLifetimeEvents();
+        const events = response?.threadLifetimeEvents ?? [];
+        this._threadLifetimes = new Map();
+        for (const ev of events) {
+          const tid = ev?.thread?.id;
+          if (tid == null) continue;
+          if (!this._threadLifetimes.has(tid)) {
+            this._threadLifetimes.set(tid, {});
+          }
+          const entry = this._threadLifetimes.get(tid);
+          if (ev.eventType === 'ThreadCreated') {
+            entry.start = ev.position ?? null;
+          } else if (ev.eventType === 'ThreadTerminated') {
+            entry.end = ev.position ?? null;
+          }
+        }
+      } catch {
+        this._threadLifetimes = new Map();
       }
     }
 
@@ -315,6 +380,37 @@ export default class App {
 
     async _searchStrings(query, limit = 100) {
       return this.apiClient.searchStrings(query, limit);
+    }
+
+    async _searchMemAccess(params) {
+      const { startAddr, endAddr, mode, timeStartPct, timeEndPct } = params;
+      const timeoutMs = 300000;  // 5 min — backend should never cut off; percent range is the sole limiter
+      try {
+        this.apiClient.drainQueue();
+        await this.apiClient.waitForIdle();
+        return await this.apiClient.getMemAccess({
+          startAddr, endAddr, mode,
+          timeoutMs,
+          timeStartPct, timeEndPct,
+        });
+      } catch (error) {
+        this.notificationBar?.show(`Mem access query failed: ${error.message}`, 'error');
+        throw error;
+      }
+    }
+
+    async _fetchCallstacksAtPositions(positions, threadId) {
+      // Fetch call stacks in parallel for multiple positions
+      const results = await Promise.all(
+        positions.map(async (pos) => {
+          try {
+            return await this.dataManager.fetchCallStack(0, threadId, pos);
+          } catch {
+            return null;
+          }
+        })
+      );
+      return results.filter(r => r !== null);
     }
 
     async _requestServerStop() {
@@ -405,6 +501,8 @@ export default class App {
       this.memoryLayoutView.onRequestPageContent = (address) => this._fetchMemoryLayoutPageContent(address);
       this.memoryLayoutView.onViewPageSvg = (address) => this._openMemoryLayoutPageSvg(address);
       this.memoryLayoutView.onViewInPe = ({ base }) => this._openModuleInPe(base);
+      this.memoryLayoutView.onViewInMemAccess = ({ base, end, label }) =>
+        this._openMemAccessRange(base, end, 'W');
       this.memoryLayoutView.setDisconnected();
     }
 
@@ -437,6 +535,60 @@ export default class App {
       this.stringsView.onSearch = async ({ query, limit }) => this._searchStrings(query, limit);
       this.stringsView.onViewSvg = (address) => this._openMemoryLayoutPageSvg(address);
       this.stringsView.setDisconnected();
+    }
+
+    const memaccessContainer = document.getElementById('memaccess-workspace');
+    if (memaccessContainer) {
+      this.memaccessView = new MemAccessView(memaccessContainer);
+      this.memaccessView.onSearch = async (params) =>
+        this._searchMemAccess(params);
+      this.memaccessView.onClickPosition = (major, minor, threadId) =>
+        this._openPosition(major, minor, threadId);
+      this.memaccessView.setDisconnected();
+    }
+
+    const flamegraphContainer = document.getElementById('flamegraph-workspace');
+    if (flamegraphContainer) {
+      this.flamegraphView = new FlameGraphView(flamegraphContainer);
+      this.flamegraphView.onGetTraceBounds = () => this.state.timeBounds;
+      this.flamegraphView.onGetThreads = () => this.state.threads;
+      this.flamegraphView.onGetThreadLifetimes = () => this._threadLifetimes;
+      this.flamegraphView.onGetActiveThreadId = () => this.state.activeThreadId;
+      this.flamegraphView.onFetchCallstacks = async ({ positions, threadId }) =>
+        this._fetchCallstacksAtPositions(positions, threadId);
+      this.flamegraphView.onClickFrame = (start, end, mode) =>
+        this._openMemAccessRange(start, end, mode);
+      this.flamegraphView.setDisconnected();
+    }
+
+    const queueContainer = document.getElementById('queue-workspace');
+    if (queueContainer) {
+      this.queueView = new QueueView(queueContainer);
+      this.queueView.onGetState = () => this.apiClient.dumpQueueState();
+      this.queueView.setDisconnected();
+    }
+
+    const positionContainer = document.getElementById('position-workspace');
+    if (positionContainer) {
+      this.positionView = new PositionView(positionContainer);
+      this.positionView.onFetchCallstack = async ({ major, minor, threadId }) => {
+        const data = await this.dataManager.fetchCallStack(0, threadId,
+          { major: String(major), minor: Number(minor) });
+        return data?.frames ?? [];
+      };
+      this.positionView.onFetchRegisters = async ({ major, minor, threadId }) => {
+        const data = await this.dataManager.fetchRegisters(0, threadId,
+          { major: String(major), minor: Number(minor) });
+        return data?.registers ?? {};
+      };
+      this.positionView.onFetchStackSvg = async ({ major, minor, threadId, rsp }) => {
+        const dark = this.getPageSvgTheme() === 'dark';
+        return await this.apiClient.getPageSvg({
+          major: String(major), minor: Number(minor),
+          threadId, address: String(rsp), dark,
+        });
+      };
+      this.positionView.setDisconnected();
     }
 
     const svgBtn = document.getElementById('btn-page-svg');
@@ -515,9 +667,15 @@ export default class App {
   }
 
   setActiveTab(tabName) {
-    const validTabs = ['timeline', 'command', 'function', 'page', 'memorylayout', 'environment', 'model', 'pe', 'strings'];
+    const validTabs = ['timeline', 'command', 'function', 'page', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
     const nextTab = validTabs.includes(tabName) ? tabName : 'timeline';
     this.state.activeTab = nextTab;
+
+    // Cancel in-flight requests when switching away from flamegraph to avoid
+    // deadlocking the single-threaded dk server (e.g. callstacks vs mem-access)
+    if (nextTab !== 'flamegraph') {
+      this.apiClient.drainQueue();
+    }
 
     const appRoot = document.getElementById('app');
     if (appRoot) {
@@ -538,6 +696,10 @@ export default class App {
     this.modelView?.setActive(nextTab === 'model');
     this.peView?.setActive(nextTab === 'pe');
     this.stringsView?.setActive(nextTab === 'strings');
+    this.memaccessView?.setActive(nextTab === 'memaccess');
+    this.flamegraphView?.setActive(nextTab === 'flamegraph');
+    this.queueView?.setActive(nextTab === 'queue');
+    this.positionView?.setActive(nextTab === 'position');
 
     if (nextTab === 'page') {
       this.loadPageSvgIntoTab();
@@ -685,20 +847,16 @@ export default class App {
   async openPageSvg() {
     if (!this.state.traceInfo?.available) return;
     try {
-      const darkFlag = this.getPageSvgTheme() === 'dark' ? '&dark=1' : '&dark=0';
       const requestedAddress = this.resolvePageRequestAddress('');
       const position = this.getCurrentTracePosition();
-      const posParam = position?.major != null
-        ? `major=${encodeURIComponent(position.major)}&minor=${encodeURIComponent(position.minor ?? 0)}`
-        : `time=${Math.floor(this.state.currentTime)}`;
-      const threadParam = this.state.activeThreadId != null
-        ? `&thread_id=${encodeURIComponent(this.state.activeThreadId)}&threadId=${encodeURIComponent(this.state.activeThreadId)}`
-        : '';
-      const addressParam = requestedAddress ? `&address=${encodeURIComponent(requestedAddress)}` : '';
-      const url = `${this.dataManager.baseUrl}/page/svg?${posParam}${threadParam}${addressParam}${darkFlag}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const svgText = await response.text();
+      const dark = this.getPageSvgTheme() === 'dark';
+      const svgText = await this.apiClient.getPageSvg({
+        major: position?.major,
+        minor: position?.minor,
+        threadId: this.state.activeThreadId,
+        address: requestedAddress || undefined,
+        dark,
+      });
       const blob = new Blob([svgText], { type: 'image/svg+xml' });
       const blobUrl = URL.createObjectURL(blob);
       window.open(blobUrl, '_blank');
@@ -740,17 +898,14 @@ export default class App {
 
     try {
       const position = this.getCurrentTracePosition();
-      const posParam = position?.major != null
-        ? `major=${encodeURIComponent(position.major)}&minor=${encodeURIComponent(position.minor ?? 0)}`
-        : `time=${Math.floor(this.state.currentTime)}`;
-      const threadParam = this.state.activeThreadId != null
-        ? `&thread_id=${encodeURIComponent(this.state.activeThreadId)}&threadId=${encodeURIComponent(this.state.activeThreadId)}`
-        : '';
-      const addressParam = requestedAddress ? `&address=${encodeURIComponent(requestedAddress)}` : '';
-      const url = `${this.dataManager.baseUrl}/page/svg?${posParam}${threadParam}${addressParam}${darkFlag}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const svgText = await response.text();
+      const dark = this.getPageSvgTheme() === 'dark';
+      const svgText = await this.apiClient.getPageSvg({
+        major: position?.major,
+        minor: position?.minor,
+        threadId: this.state.activeThreadId,
+        address: requestedAddress || undefined,
+        dark,
+      });
 
       frame.innerHTML = svgText;
 
