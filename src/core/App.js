@@ -19,6 +19,7 @@ import MemAccessView from '../components/MemAccessView.js';
 import FlameGraphView from '../components/FlameGraphView.js';
 import QueueView from '../components/QueueView.js';
 import PositionView from '../components/PositionView.js';
+import MemoryPageSvgView from '../components/MemoryPageSvgView.js';
 
 const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timelineHeight
 
@@ -591,6 +592,14 @@ export default class App {
       this.positionView.setDisconnected();
     }
 
+    const pageSvgContainer = document.getElementById('pagesvg-workspace');
+    if (pageSvgContainer) {
+      this.pageSvgView = new MemoryPageSvgView(pageSvgContainer);
+      this.pageSvgView.onNavigate = (address) => this._navigatePageSvg(address);
+      this.pageSvgView.onClickAnnotationAddr = (address) => this._openMemAccessRange(address, address, 'W');
+      this.pageSvgView.setDisconnected();
+    }
+
     const svgBtn = document.getElementById('btn-page-svg');
     if (svgBtn) svgBtn.addEventListener('click', () => this.setActiveTab('page'));
 
@@ -667,7 +676,7 @@ export default class App {
   }
 
   setActiveTab(tabName) {
-    const validTabs = ['timeline', 'command', 'function', 'page', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
+    const validTabs = ['timeline', 'command', 'function', 'page', 'pagesvg', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
     const nextTab = validTabs.includes(tabName) ? tabName : 'timeline';
     this.state.activeTab = nextTab;
 
@@ -700,9 +709,13 @@ export default class App {
     this.flamegraphView?.setActive(nextTab === 'flamegraph');
     this.queueView?.setActive(nextTab === 'queue');
     this.positionView?.setActive(nextTab === 'position');
+    this.pageSvgView?.setActive(nextTab === 'pagesvg');
 
     if (nextTab === 'page') {
       this.loadPageSvgIntoTab();
+    }
+    if (nextTab === 'pagesvg') {
+      this._loadPageSvgView();
     }
     if (nextTab === 'memorylayout') {
       this._fetchMemoryLayout();
@@ -937,6 +950,39 @@ export default class App {
 
   _escapeHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async _loadPageSvgView() {
+    if (!this.pageSvgView || !this.state.traceInfo?.available) return;
+    try {
+      const position = this.getCurrentTracePosition();
+      const requestedAddress = this.resolvePageRequestAddress('');
+      const data = await this.apiClient.getPageRender({
+        major: position?.major,
+        minor: position?.minor,
+        threadId: this.state.activeThreadId,
+        address: requestedAddress || undefined,
+      });
+      this.pageSvgView.setData(data);
+    } catch (err) {
+      this.notificationBar?.show(`Page render: ${err.message}`, 'error');
+    }
+  }
+
+  async _navigatePageSvg(address) {
+    if (!this.pageSvgView) return;
+    try {
+      const position = this.getCurrentTracePosition();
+      const data = await this.apiClient.getPageRender({
+        major: position?.major,
+        minor: position?.minor,
+        threadId: this.state.activeThreadId,
+        address,
+      });
+      this.pageSvgView.setData(data);
+    } catch (err) {
+      this.notificationBar?.show(`Page render: ${err.message}`, 'error');
+    }
   }
 
   getPageSvgTheme() {

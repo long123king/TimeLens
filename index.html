@@ -33,6 +33,7 @@
     #app[data-active-tab="command"] #pixi-canvas,
     #app[data-active-tab="function"] #pixi-canvas,
     #app[data-active-tab="page"] #pixi-canvas,
+    #app[data-active-tab="pagesvg"] #pixi-canvas,
     #app[data-active-tab="memorylayout"] #pixi-canvas,
     #app[data-active-tab="environment"] #pixi-canvas,
     #app[data-active-tab="model"] #pixi-canvas,
@@ -251,6 +252,7 @@
 
     #app[data-active-tab="command"] #right-dock,
     #app[data-active-tab="page"] #right-dock,
+    #app[data-active-tab="pagesvg"] #right-dock,
     #app[data-active-tab="memorylayout"] #right-dock,
     #app[data-active-tab="environment"] #right-dock,
     #app[data-active-tab="model"] #right-dock,
@@ -268,6 +270,7 @@
     #app[data-active-tab="command"] #callstack-panel,
     #app[data-active-tab="command"] #hex-panel,
     #app[data-active-tab="page"] #right-dock,
+    #app[data-active-tab="pagesvg"] #right-dock,
     #app[data-active-tab="memorylayout"] #right-dock,
     #app[data-active-tab="environment"] #right-dock,
     #app[data-active-tab="model"] #right-dock,
@@ -764,6 +767,112 @@
       #app[data-active-tab="page"] #page-workspace {
         display: flex;
       }
+
+
+      #pagesvg-workspace {
+        position: absolute;
+        top: calc(10px + var(--header-height));
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        display: none;
+        min-height: 0;
+        border: 2px solid #2a5a4a;
+        border-radius: 6px;
+        background: rgba(12, 22, 18, 0.97);
+        box-shadow: inset 0 0 1px rgba(78, 201, 176, 0.06), 0 8px 24px rgba(0, 0, 0, 0.4);
+        overflow: hidden;
+      }
+
+      #app[data-active-tab="pagesvg"] #pagesvg-workspace {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .mp-root { position: relative; height: 100%; }
+
+      .mp-toolbar {
+        position: absolute; top: 0; left: 0; right: 0;
+        background: rgba(16, 28, 22, 0.97);
+        border-bottom: 1px solid #2a5a4a;
+        padding: 6px 10px;
+        z-index: 2;
+      }
+
+      .mp-toolbar-row {
+        display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      }
+
+      .mp-addr-form {
+        display: flex; align-items: center; gap: 4px;
+      }
+
+      .mp-addr-input {
+        width: 180px;
+        background: #1a1225; color: #c0b0d8;
+        border: 1px solid #3a2a50; border-radius: 4px;
+        padding: 4px 8px; font-family: monospace; font-size: 12px;
+      }
+
+      .mp-page-info {
+        color: #7a8a6a; font-size: 11px; font-family: monospace;
+      }
+
+      .mp-toolbar-spacer { flex: 1; }
+
+      .mp-toggle {
+        display: flex; align-items: center; gap: 4px;
+        color: #8a9a7a; font-size: 11px; cursor: pointer;
+      }
+
+      .mp-btn {
+        background: rgba(32, 42, 32, 0.7); color: #9aba9a;
+        border: 1px solid #3a5a3a; border-radius: 4px;
+        padding: 4px 10px; font-size: 12px; cursor: pointer;
+      }
+      .mp-btn:hover { background: rgba(50, 70, 50, 0.9); }
+      .mp-btn.primary { background: rgba(40, 100, 80, 0.6); border-color: #5aaa7a; }
+
+      .mp-body {
+        position: absolute; top: 40px; bottom: 0; left: 0; right: 0;
+        overflow-y: auto; overflow-x: auto;
+      }
+
+      .mp-placeholder {
+        display: flex; flex-direction: column; align-items: center;
+        justify-content: center; height: 100%;
+        color: #5a7a5a; font-size: 14px;
+      }
+      .mp-placeholder-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+
+      .mp-svg { display: block; }
+
+      .mp-cell { cursor: pointer; }
+      .mp-cell:hover { filter: brightness(1.3); }
+      .mp-cell-rsp { stroke: #ffd700 !important; stroke-width: 2 !important; }
+
+      .mp-annot-clickable { cursor: pointer; }
+      .mp-annot-clickable:hover rect { filter: brightness(1.4); }
+      .mp-annot-clickable:hover text { fill: #fff !important; }
+
+      .mp-detail {
+        position: absolute; bottom: 10px; right: 10px;
+        width: 280px; max-height: 240px;
+        background: rgba(18, 28, 22, 0.96);
+        border: 1px solid #3a5a4a; border-radius: 6px;
+        padding: 10px; z-index: 5;
+        overflow-y: auto;
+      }
+      .mp-detail-head {
+        color: #9aca8a; font-size: 12px; font-weight: bold;
+        margin-bottom: 6px; border-bottom: 1px solid #2a4a3a; padding-bottom: 4px;
+      }
+      .mp-detail-row {
+        display: flex; gap: 10px; margin-bottom: 4px;
+        font-family: monospace; font-size: 11px;
+      }
+      .mp-detail-key { color: #6a8a6a; min-width: 70px; }
+      .mp-detail-row span:last-child { color: #c0d0b0; word-break: break-all; }
 
       #memorylayout-workspace {
         position: absolute;
@@ -4990,6 +5099,7 @@
         <button class="workspace-tab" data-tab-target="command" role="tab" aria-selected="false">Command</button>
         <button class="workspace-tab" data-tab-target="function" role="tab" aria-selected="false">Function Calls</button>
         <button class="workspace-tab" data-tab-target="page" role="tab" aria-selected="false">Page Memory</button>
+        <button class="workspace-tab" data-tab-target="pagesvg" role="tab" aria-selected="false">Page SVG</button>
         <button class="workspace-tab" data-tab-target="memorylayout" role="tab" aria-selected="false">Memory Layout</button>
         <button class="workspace-tab" data-tab-target="pe" role="tab" aria-selected="false">PE</button>
         <button class="workspace-tab" data-tab-target="strings" role="tab" aria-selected="false">Strings</button>
@@ -5219,6 +5329,8 @@
           </div>
         </div>
       </div>
+
+      <div id="pagesvg-workspace"></div>
 
       <div id="memorylayout-workspace"></div>
 

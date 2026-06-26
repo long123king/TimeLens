@@ -1,0 +1,344 @@
+/**
+ * MemoryPageSvgView — pixel-exact replication of dk.dll page_2_svg.
+ *
+ * Mirrors visual_page() / page_to_svg_string() SVG generation:
+ *   CSvgGrids for addr, hex, ascii + per-row bitmap strips + annotation arrows.
+ */
+export default class MemoryPageSvgView {
+  constructor(container) {
+    this._container = container;
+    this._data = null;
+    this._bytes = null;
+    this._theme = 'dark';
+    this._selectedOffset = -1;
+    this._hoveredOffset = -1;
+    this._categories = null;
+
+    this.onNavigate = null;
+    this.onClickAnnotationAddr = null;
+
+    // dk.dll CoordinatesManager constants
+    this._GW = 40; this._GH = 30; this._AW = 220; this._OX = 100; this._OY = 100;
+    this._buildShell();
+  }
+
+  setActive(a) { this._active = a; }
+  setDisconnected() { this._renderPlaceholder('\u25C8', 'Not connected to a debug session.'); }
+  setTheme(t) { this._theme = t === 'light' ? 'light' : 'dark'; if (this._data) this._render(); }
+
+  setData(data) {
+    this._data = data; this._bytes = null; this._categories = null;
+    this._selectedOffset = this._hoveredOffset = -1;
+    if (data?.available) {
+      const h = data.bytes ?? '';
+      this._bytes = new Uint8Array(0x1000);
+      for (let i = 0; i < 0x1000 && i * 2 + 2 <= h.length; i++) this._bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+      this._classify();
+    }
+    this._render();
+  }
+
+  // ---- classification (Byte2FontStyle) ----
+  _classify() {
+    this._categories = new Uint8Array(0x1000);
+    for (let i = 0; i < 0x1000; i++) this._categories[i] = this._cat(this._bytes[i]);
+  }
+  _cat(b) {
+    if (b === 0) return 0; if (b >= 0x61 && b <= 0x7A || b >= 0x41 && b <= 0x5A) return 1;
+    if (b >= 0x30 && b <= 0x39) return 2; if (b <= 0x80) return 3; if (b <= 0xF0) return 4; return 5;
+  }
+  _colorNames = ['zero', 'alpha', 'numeric', 'lowAscii', 'highAscii', 'other'];
+
+  // ---- shell ----
+  _buildShell() {
+    this._container.classList.add('mp-root');
+    this._container.innerHTML = [
+      '<div class="mp-toolbar">',
+      '  <div class="mp-toolbar-row">',
+      '    <form id="mp-addr-form" class="mp-addr-form">',
+      '      <button id="mp-btn-prev" class="mp-btn small" type="button" title="Prev (PgUp)">\u25C0</button>',
+      '      <input id="mp-addr-input" class="mp-addr-input" type="text" placeholder="0x...">',
+      '      <button id="mp-btn-next" class="mp-btn small" type="button" title="Next (PgDn)">\u25B6</button>',
+      '      <button id="mp-btn-go" class="mp-btn small primary" type="submit">Go</button>',
+      '    </form>',
+      '    <span id="mp-page-info" class="mp-page-info"></span>',
+      '    <div class="mp-toolbar-spacer"></div>',
+      '    <button id="mp-btn-theme" class="mp-btn small" type="button">\u263E</button>',
+      '  </div>',
+      '</div>',
+      '<div class="mp-body">',
+      '  <div id="mp-placeholder" class="mp-placeholder"><div class="mp-placeholder-icon">\u25C8</div><div>Load a page to begin.</div></div>',
+      '  <svg id="mp-svg" class="mp-svg" xmlns="http://www.w3.org/2000/svg" style="display:none"></svg>',
+      '  <div id="mp-detail" class="mp-detail" style="display:none"><div class="mp-detail-head">Byte Detail</div><div id="mp-detail-body" class="mp-detail-body"></div></div>',
+      '</div>',
+    ].join('');
+    this._svgEl = this._container.querySelector('#mp-svg');
+    this._placeholderEl = this._container.querySelector('#mp-placeholder');
+    this._detailEl = this._container.querySelector('#mp-detail');
+    this._detailBodyEl = this._container.querySelector('#mp-detail-body');
+    this._addrInputEl = this._container.querySelector('#mp-addr-input');
+    this._pageInfoEl = this._container.querySelector('#mp-page-info');
+
+    this._container.querySelector('#mp-btn-prev').addEventListener('click', () => this._step(-1));
+    this._container.querySelector('#mp-btn-next').addEventListener('click', () => this._step(1));
+    this._container.querySelector('#mp-addr-form').addEventListener('submit', e => { e.preventDefault(); this._goto(this._addrInputEl.value); });
+    this._container.querySelector('#mp-btn-theme').addEventListener('click', () => {
+      const n = this._theme === 'dark' ? 'light' : 'dark';
+      this.setTheme(n);
+      this._container.querySelector('#mp-btn-theme').textContent = n === 'dark' ? '\u263E' : '\u2600';
+    });
+    this._container.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT') return;
+      if (e.key === 'PageUp') { e.preventDefault(); this._step(-1); }
+      if (e.key === 'PageDown') { e.preventDefault(); this._step(1); }
+    });
+    const svgClick = (e) => {
+      const c = e.target.closest('[data-offset]');
+      if (c) this._select(parseInt(c.getAttribute('data-offset'), 10));
+      const a = e.target.closest('[data-nav-addr]');
+      if (a) { const addr = a.getAttribute('data-nav-addr'); if (addr && this.onNavigate) this.onNavigate(addr); return; }
+      const b = e.target.closest('[data-target-addr]');
+      if (b) { const addr = b.getAttribute('data-target-addr'); if (addr && this.onClickAnnotationAddr) this.onClickAnnotationAddr(addr); }
+    };
+    this._svgEl.addEventListener('click', svgClick);
+    this._svgEl.addEventListener('mouseover', e => {
+      const c = e.target.closest('[data-offset]');
+      this._hover(c ? parseInt(c.getAttribute('data-offset'), 10) : -1);
+    });
+    this._svgEl.addEventListener('mouseleave', () => this._hover(-1));
+  }
+
+  // ---- render (mirrors visual_page) ----
+  _render() {
+    if (!this._data?.available || !this._bytes) { this._renderPlaceholder('\u25C8', 'No page data available.'); return; }
+    this._placeholderEl.style.display = 'none';
+    this._svgEl.style.display = 'block';
+
+    const S = this._data.colorScheme?.[this._theme] ?? {};
+    const bg = S.bg ?? '#161b22', gridStroke = S.gridStroke ?? '#465161';
+    const addrText = S.addrText ?? '#dbe3eb', hexText = S.hexText ?? '#f0f6fc';
+    const asciiText = S.asciiText ?? '#b5bfca', bitOn = S.bitOn ?? '#a2adba', bitOff = S.bitOff ?? '#495666';
+    const arrowC = S.arrowColor ?? '#ff938a', arrowO = S.arrowOpacity ?? 0.72;
+    const localC = S.localColor ?? '#8ff79a', heapC = S.heapColor ?? '#79c0ff';
+    const rectS = S.rectStroke ?? '#ff938a', rectF = S.rectFill ?? '#ff938a', rectFO = S.rectFillOpacity ?? 0.3;
+    const textC = S.textColor ?? '#f0f6fc', strC = S.stringColor ?? '#ffb4ad';
+
+    const GW = this._GW, GH = this._GH, AW = this._AW, OX = this._OX, OY = this._OY;
+    const ROWS = 512, COLS = 8;
+    const gridX = OX + AW; // 280
+    const gridRight = gridX + COLS * GW; // 600
+    const canvasW = 3000, canvasH = OY + ROWS * GH + 200;
+
+    const NS = 'http://www.w3.org/2000/svg';
+    this._svgEl.innerHTML = '';
+    this._svgEl.setAttribute('viewBox', `0 0 ${canvasW} ${canvasH}`);
+    this._svgEl.style.width = '100%'; this._svgEl.style.height = 'auto';
+    const mk = (t, a = {}, txt = '') => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (txt) e.textContent = txt; return e; };
+
+    // Background
+    this._svgEl.appendChild(mk('rect', { x: 0, y: 0, width: canvasW, height: canvasH, fill: bg, stroke: 'none' }));
+
+    // Defs
+    const defs = mk('defs');
+    defs.appendChild(this._arrowhead(NS, 'arrowheadr', arrowC, arrowO));
+    defs.appendChild(this._arrowhead(NS, 'arrowheadg', localC, arrowO));
+    defs.appendChild(this._arrowhead(NS, 'arrowheadb', heapC, arrowO));
+    this._svgEl.appendChild(defs);
+
+    const addrBig = BigInt(this._data.pageAddr);
+    const rspOff = this._data.rsp ? Number(BigInt(this._data.rsp) - addrBig) : -1;
+
+    // ---- 1. Address grid (CSvgGrids: 1 col × 512 rows, cell 180×30, at (100, 100)) ----
+    const gALines = mk('g'); const gARects = mk('g'); const gATexts = mk('g');
+    gALines.setAttribute('stroke', gridStroke); gALines.setAttribute('fill', 'none');
+    gATexts.setAttribute('fill', addrText); gATexts.setAttribute('font-family', 'monospace'); gATexts.setAttribute('font-size', '16');
+    for (let r = 0; r <= ROWS; r++) gALines.appendChild(mk('line', { x1: OX, y1: OY + r * GH, x2: OX + AW, y2: OY + r * GH }));
+    // 1 column = no vertical lines (or just the edges)
+    gALines.appendChild(mk('line', { x1: OX, y1: OY, x2: OX, y2: OY + ROWS * GH }));
+    gALines.appendChild(mk('line', { x1: OX + AW, y1: OY, x2: OX + AW, y2: OY + ROWS * GH }));
+    for (let r = 0; r < ROWS; r++) {
+      const a = addrBig + BigInt(r * 8);
+      const ah = '0x' + a.toString(16).padStart(16, '0');
+      const label = ah.slice(0, 10) + "'" + ah.slice(10);
+      gATexts.appendChild(mk('text', { x: OX + 10, y: OY + r * GH + 20, 'font-size': '16' }, label));
+    }
+    this._svgEl.appendChild(gALines); this._svgEl.appendChild(gARects); this._svgEl.appendChild(gATexts);
+
+    // ---- 2. Hex content grid (CSvgGrids: 8 cols × 512 rows, cell 40×30, at (280, 100)) ----
+    const gHLines = mk('g'); const gHRects = mk('g'); const gHTexts = mk('g');
+    gHLines.setAttribute('stroke', gridStroke); gHLines.setAttribute('fill', 'none');
+    gHTexts.setAttribute('fill', hexText); gHTexts.setAttribute('font-family', 'monospace'); gHTexts.setAttribute('font-size', '16');
+    for (let r = 0; r <= ROWS; r++) gHLines.appendChild(mk('line', { x1: gridX, y1: OY + r * GH, x2: gridRight, y2: OY + r * GH }));
+    for (let c = 0; c <= COLS; c++) gHLines.appendChild(mk('line', { x1: gridX + c * GW, y1: OY, x2: gridX + c * GW, y2: OY + ROWS * GH }));
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const off = r * 8 + c;
+        const x = gridX + c * GW, y = OY + r * GH;
+        const fill = this._data.colorScheme?.[this._theme]?.[this._colorNames[this._categories[off]]] ?? '#888';
+        const isRsp = (off === rspOff);
+        const selS = this._selectedOffset === off ? '#fff' : this._hoveredOffset === off ? '#aaa' : gridStroke;
+        const selW = this._selectedOffset === off ? 2 : 1;
+        gHRects.appendChild(mk('rect', { x, y, width: GW, height: GH, fill, stroke: isRsp ? '#ff0' : selS, 'stroke-width': isRsp ? 2 : selW, 'data-offset': off, class: 'mp-cell' + (isRsp ? ' mp-cell-rsp' : '') }));
+        const hex = this._bytes[off].toString(16).toUpperCase().padStart(2, '0');
+        gHTexts.appendChild(mk('text', { x: x + 10, y: y + 20, 'font-size': '16', 'pointer-events': 'none' }, hex));
+      }
+    }
+    this._svgEl.appendChild(gHLines); this._svgEl.appendChild(gHRects); this._svgEl.appendChild(gHTexts);
+
+    // ---- 3. ASCII grid (offset by GW*0.6, GH*0.2, i.e. +24, +6) ----
+    const gALines2 = mk('g'); const gARects2 = mk('g'); const gATexts2 = mk('g');
+    gATexts2.setAttribute('fill', asciiText); gATexts2.setAttribute('font-family', 'monospace'); gATexts2.setAttribute('font-size', '6');
+    gATexts2.setAttribute('fill-opacity', '0.6');
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const b = this._bytes[r * 8 + c];
+        const ch = (b >= 0x20 && b <= 0x7E) ? String.fromCharCode(b) : '.';
+        gATexts2.appendChild(mk('text', { x: gridX + 24 + c * GW + 10, y: OY + 6 + r * GH + 20, 'font-size': '6' }, ch));
+      }
+    }
+    this._svgEl.appendChild(gALines2); this._svgEl.appendChild(gARects2); this._svgEl.appendChild(gATexts2);
+
+    // ---- 4. Bitmap overlay (per row: 1 row × 64 cols, cell 5×3.75, at gridX, OY+row*GH) ----
+    const gB = mk('g');
+    const bW = GW / 8, bH = GH / 8;
+    for (let row = 0; row < ROWS; row++) {
+      const gBLines = mk('g'); const gBRects = mk('g');
+      gBLines.setAttribute('stroke', gridStroke); gBLines.setAttribute('stroke-width', '1');
+      for (let i = 0; i <= 64; i++) gBLines.appendChild(mk('line', { x1: gridX + i * bW, y1: OY + row * GH, x2: gridX + i * bW, y2: OY + row * GH + bH }));
+      gBLines.appendChild(mk('line', { x1: gridX, y1: OY + row * GH, x2: gridX + 64 * bW, y2: OY + row * GH }));
+      gBLines.appendChild(mk('line', { x1: gridX, y1: OY + row * GH + bH, x2: gridX + 64 * bW, y2: OY + row * GH + bH }));
+      for (let c = 0; c < 8; c++) {
+        const b = this._bytes[row * 8 + c];
+        for (let bit = 0; bit < 8; bit++) {
+          const on = (b & (1 << (7 - bit))) !== 0;
+          gBRects.appendChild(mk('rect', { x: gridX + (c * 8 + bit) * bW, y: OY + row * GH, width: bW, height: bH, fill: on ? bitOn : bitOff, stroke: gridStroke, 'stroke-width': '1' }));
+        }
+      }
+      gB.appendChild(gBLines); gB.appendChild(gBRects);
+    }
+    this._svgEl.appendChild(gB);
+
+    // ---- 5. Annotations ----
+    const gArrows = mk('g'); const gAnnot = mk('g'); const gStr = mk('g');
+    gArrows.setAttribute('stroke', arrowC); gArrows.setAttribute('stroke-width', '3'); gArrows.setAttribute('stroke-opacity', arrowO);
+
+    const ann = this._data.annotations ?? {};
+    // ptr2sym
+    for (const s of (ann.ptr2sym ?? [])) {
+      const row = s.offset / 8 | 0, col = s.offset % 8;
+      const py = OY + row * GH + GH / 2;
+      const text = s.targetAddr ?? '', boxX = 1010, boxW = Math.max(180, text.length * 10 + 20);
+      gArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, 'marker-end': 'url(#arrowheadr)' }));
+      const g = mk('g', { 'data-target-addr': text, class: 'mp-annot-clickable' });
+      g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO, stroke: rectS, 'stroke-width': '2', 'data-target-addr': text }));
+      g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': text }, text));
+      if (s.symbol) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, this._esc(s.symbol.substring(0, 40))));
+      gAnnot.appendChild(g);
+    }
+    // ptr2local — two-step: red arrow → address rect, green bezier → target cell
+    for (const l of (ann.ptr2local ?? [])) {
+      const fr = l.fromOffset / 8 | 0, fc = l.fromOffset % 8;
+      const tr = l.toOffset / 8 | 0;
+      const sy = OY + fr * GH + GH / 2; // source row center
+      const ey = OY + tr * GH + GH / 2; // target row center
+
+      const targetAddr = addrBig + BigInt(l.toOffset);
+      const targetText = '0x' + targetAddr.toString(16).padStart(16, '0');
+      const boxX = 1010, boxW = Math.max(180, targetText.length * 10 + 20);
+
+      // Step 1: horizontal red arrow from source cell → annotation box
+      gArrows.appendChild(mk('line', { x1: gridRight, y1: sy, x2: 1000, y2: sy, stroke: arrowC, 'stroke-width': '3', 'stroke-opacity': arrowO, 'marker-end': 'url(#arrowheadr)' }));
+
+      // Address rect + text (centered on source row) — clickable if off-page
+      const samePage = (targetAddr >> 12n) === (addrBig >> 12n);
+      const navAttrs = samePage ? {} : { 'data-nav-addr': targetText, class: 'mp-annot-clickable' };
+      gAnnot.appendChild(mk('rect', { x: boxX, y: sy - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO,
+        stroke: samePage ? rectS : '#5aafda', 'stroke-width': '2', ...navAttrs }));
+      gAnnot.appendChild(mk('text', { x: boxX + 10, y: sy + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', ...navAttrs }, targetText));
+
+      // Offset label
+      const diff = l.toOffset - l.fromOffset;
+      const diffStr = diff >= 0 ? `+0x${diff.toString(16)}` : `-0x${(-diff).toString(16)}`;
+      gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: sy + 5, fill: localC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, diffStr));
+
+      // Step 2: green bezier from annotation box → target cell
+      const midY = (sy + ey) / 2;
+      const c1x = Math.round((4000 + gridRight) / 5);
+      const c2x = Math.round((1000 + gridRight) / 2);
+      const tc = l.toOffset % 8;
+      const tgtX = gridX + (tc + 1) * GW;
+      gArrows.appendChild(mk('path', { d: `M${1000 - GW},${sy} C${c1x},${sy} ${c2x},${midY} ${gridRight},${ey}`, fill: 'none', stroke: localC, 'stroke-width': '3', 'stroke-opacity': arrowO, 'marker-end': 'url(#arrowheadg)' }));
+    }
+    // ptr2heap
+    for (const h of (ann.ptr2heap ?? [])) {
+      const row = h.offset / 8 | 0, col = h.offset % 8;
+      const py = OY + row * GH + GH / 2;
+      const addr = h.targetAddr ?? '';
+      const boxX = 1010, boxW = Math.max(160, addr.length * 10 + 20);
+      gArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, stroke: heapC, 'stroke-opacity': '0.8', 'marker-end': 'url(#arrowheadb)' }));
+      const g = mk('g', { 'data-target-addr': addr, class: 'mp-annot-clickable' });
+      g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: heapC, 'fill-opacity': '0.2', stroke: heapC, 'stroke-width': '2', 'data-target-addr': addr }));
+      g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: heapC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': addr }, addr));
+      if (h.heapSize) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12' }, `heap 0x${h.heapSize.toString(16)}`));
+      gAnnot.appendChild(g);
+    }
+    // string annotations
+    const strMap = new Map();
+    for (const s of (ann.ptr2astr ?? [])) {
+      const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`"${s.text.substring(0, 40)}"`);
+    }
+    for (const s of (ann.ptr2ustr ?? [])) {
+      const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`L"${s.text.substring(0, 40)}"`);
+    }
+    for (const [off, texts] of strMap) {
+      const row = off / 8 | 0;
+      gStr.appendChild(mk('text', { x: 1400, y: OY + row * GH + GH / 2 + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, texts.join(' | ')));
+    }
+
+    this._svgEl.appendChild(gArrows); this._svgEl.appendChild(gAnnot); this._svgEl.appendChild(gStr);
+
+    // Toolbar
+    this._addrInputEl.value = this._data.pageAddr;
+    this._pageInfoEl.textContent = `RSP: ${this._data.rsp || '(none)'}`;
+  }
+
+  _arrowhead(NS, id, color, opacity) {
+    const m = document.createElementNS(NS, 'marker');
+    m.setAttribute('id', id); m.setAttribute('viewBox', '0 0 10 7'); m.setAttribute('refX', '10'); m.setAttribute('refY', '3.5');
+    m.setAttribute('markerWidth', '10'); m.setAttribute('markerHeight', '7'); m.setAttribute('orient', 'auto');
+    const p = document.createElementNS(NS, 'polygon');
+    p.setAttribute('points', '0 0, 10 3.5, 0 7'); p.setAttribute('fill', color); p.setAttribute('fill-opacity', opacity); p.setAttribute('stroke', 'none');
+    m.appendChild(p); return m;
+  }
+
+  // ---- interactivity ----
+  _hover(off) { if (this._hoveredOffset === off) return; this._hoveredOffset = off; this._render(); }
+  _select(off) {
+    if (this._selectedOffset === off) { this._selectedOffset = -1; this._detailEl.style.display = 'none'; }
+    else { this._selectedOffset = off; this._updateDetail(off); this._detailEl.style.display = 'block'; }
+    this._render();
+  }
+  _updateDetail(off) {
+    if (!this._bytes || off < 0 || off >= 0x1000) return;
+    const a = BigInt(this._data.pageAddr) + BigInt(off);
+    const b = this._bytes[off];
+    let q = ''; for (let i = 7; i >= 0; i--) q += (this._bytes[off + i] ?? 0).toString(16).padStart(2, '0').toUpperCase();
+    this._detailBodyEl.innerHTML = [
+      `<div class="mp-detail-row"><span class="mp-detail-key">Offset</span><span>0x${off.toString(16).padStart(3, '0')}</span></div>`,
+      `<div class="mp-detail-row"><span class="mp-detail-key">Address</span><span>0x${a.toString(16).padStart(16, '0')}</span></div>`,
+      `<div class="mp-detail-row"><span class="mp-detail-key">Byte</span><span>0x${b.toString(16).padStart(2, '0').toUpperCase()} (${b})</span></div>`,
+      `<div class="mp-detail-row"><span class="mp-detail-key">Category</span><span>${this._colorNames[this._categories[off]]}</span></div>`,
+      `<div class="mp-detail-row"><span class="mp-detail-key">Binary</span><span>${b.toString(2).padStart(8, '0')}</span></div>`,
+      `<div class="mp-detail-row"><span class="mp-detail-key">As Qword</span><span>0x${q}</span></div>`,
+    ].join('');
+  }
+
+  _step(d) { if (!this._data?.pageAddr) return; try { const n = BigInt(this._data.pageAddr) + BigInt(d) * 0x1000n; if (n >= 0n) this._goto('0x' + n.toString(16)); } catch {} }
+  _goto(r) { const t = String(r ?? '').trim(); if (!t) return; try { BigInt(t); if (this.onNavigate) this.onNavigate(t); } catch {} }
+  _renderPlaceholder(icon, text) {
+    this._placeholderEl.style.display = 'flex'; this._svgEl.style.display = 'none'; this._detailEl.style.display = 'none';
+    const i = this._placeholderEl.querySelector('.mp-placeholder-icon'); if (i) i.textContent = icon;
+    const t = i?.nextElementSibling; if (t) t.textContent = text;
+  }
+  _esc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+}
