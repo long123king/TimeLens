@@ -596,7 +596,7 @@ export default class App {
     if (pageSvgContainer) {
       this.pageSvgView = new MemoryPageSvgView(pageSvgContainer);
       this.pageSvgView.onNavigate = (address) => this._navigatePageSvg(address);
-      this.pageSvgView.onClickAnnotationAddr = (address) => this._openMemAccessRange(address, address, 'W');
+      this.pageSvgView.onClickAnnotationAddr = (address) => this._navigatePageSvg(address);
       this.pageSvgView.setDisconnected();
     }
 
