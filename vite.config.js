@@ -7,7 +7,7 @@ export default defineConfig({
     proxy: {
       // Proxy API requests to WinDbg plugin HTTP server
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://172.16.40.132:8080',
         changeOrigin: true,
       }
     }

@@ -16,6 +16,8 @@ export default class MemoryPageSvgView {
     this._selectedOffset = -1;
     this._hoveredOffset = -1;
     this._categories = null;
+    this._callTargets = null;
+    this._callByteSet = null;
     this._history = this._loadHistory();
 
     this.onNavigate = null;
@@ -33,14 +35,34 @@ export default class MemoryPageSvgView {
 
   setData(data) {
     this._data = data; this._bytes = null; this._categories = null;
+    this._callItems = null;
+    this._callByteSet = null;
     this._selectedOffset = this._hoveredOffset = -1;
     if (data?.available) {
       const h = data.bytes ?? '';
       this._bytes = new Uint8Array(0x1000);
       for (let i = 0; i < 0x1000 && i * 2 + 2 <= h.length; i++) this._bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
       this._classify();
+
+      const ann = data.annotations ?? {};
+      this._callItems = ann.ptr2call ?? [];
+      this._callByteSet = new Set();
+      for (const entry of this._callItems) {
+        const len = entry.instrLen || 5;
+        for (let j = 0; j < len; j++) this._callByteSet.add(entry.offset + j);
+      }
+
+      this._pageModule = this._resolvePageModule();
     }
     this._render();
+  }
+
+  _resolvePageModule() {
+    for (const s of (this._data.annotations?.ptr2sym ?? [])) {
+      const bang = (s.symbol || '').indexOf('!');
+      if (bang >= 0) return s.symbol.slice(0, bang).toLowerCase();
+    }
+    return '';
   }
 
   // ---- classification (Byte2FontStyle) ----
@@ -195,10 +217,13 @@ export default class MemoryPageSvgView {
         const off = r * 8 + c;
         const x = gridX + c * GW, y = OY + r * GH;
         const fill = this._data.colorScheme?.[this._theme]?.[this._colorNames[this._categories[off]]] ?? '#888';
+        const isCallByte = this._callByteSet?.has(off);
+        const cellFill = isCallByte ? 'rgba(200,170,255,0.5)' : fill;
+        const cellStroke = isCallByte ? '#c0a0ff' : '';
         const isRsp = (off === rspOff);
         const selS = this._selectedOffset === off ? '#fff' : this._hoveredOffset === off ? '#aaa' : gridStroke;
         const selW = this._selectedOffset === off ? 2 : 1;
-        gHRects.appendChild(mk('rect', { x, y, width: GW, height: GH, fill, stroke: isRsp ? '#ff0' : selS, 'stroke-width': isRsp ? 2 : selW, 'data-offset': off, class: 'mp-cell' + (isRsp ? ' mp-cell-rsp' : '') }));
+        gHRects.appendChild(mk('rect', { x, y, width: GW, height: GH, fill: cellFill, stroke: isCallByte ? cellStroke : (isRsp ? '#ff0' : selS), 'stroke-width': isRsp ? 2 : selW, 'data-offset': off, class: 'mp-cell' + (isRsp ? ' mp-cell-rsp' : '') }));
         const hex = this._bytes[off].toString(16).toUpperCase().padStart(2, '0');
         gHTexts.appendChild(mk('text', { x: x + 10, y: y + 20, 'font-size': '16', 'pointer-events': 'none' }, hex));
       }
@@ -252,7 +277,7 @@ export default class MemoryPageSvgView {
       const g = mk('g', { 'data-target-addr': text, class: 'mp-annot-clickable' });
       g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO, stroke: rectS, 'stroke-width': '2', 'data-target-addr': text }));
       g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': text }, text));
-      if (s.symbol) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, this._esc(s.symbol.substring(0, 40))));
+      if (s.symbol) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, this._esc(s.symbol)));
       gAnnot.appendChild(g);
     }
     // ptr2local — two-step: red arrow → address rect, green bezier → target cell
@@ -305,7 +330,7 @@ export default class MemoryPageSvgView {
     // string annotations
     const strMap = new Map();
     for (const s of (ann.ptr2astr ?? [])) {
-      const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`"${s.text.substring(0, 40)}"`);
+      const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`"${s.text}"`);
     }
     for (const s of (ann.ptr2ustr ?? [])) {
       const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`L"${s.text.substring(0, 40)}"`);
@@ -316,6 +341,46 @@ export default class MemoryPageSvgView {
     }
 
     this._svgEl.appendChild(gArrows); this._svgEl.appendChild(gAnnot); this._svgEl.appendChild(gStr);
+
+    // ---- 6. Call/Jump annotations ----
+    const callC = '#a0c8ff';
+    const jmpC = '#a0e8a0';
+    const xmodC = '#ffc090';
+    const gCallArrows = mk('g'); const gCallAnnot = mk('g');
+
+    for (const ct of (this._callItems ?? [])) {
+      const row = ct.offset / 8 | 0;
+      const py = OY + row * GH + GH / 2;
+      const isJmp = (ct.kind === 'jmp' || ct.kind === 'jmp8');
+      const callMod = ct.symbol ? (() => { const b = ct.symbol.indexOf('!'); return b >= 0 ? ct.symbol.slice(0, b).toLowerCase() : ''; })() : '';
+      const isXMod = callMod && this._pageModule && callMod !== this._pageModule;
+      let color = callC;
+      if (isXMod) color = xmodC;
+      else if (isJmp) color = jmpC;
+
+      const kindLabel = ct.kind || 'call';
+      const targetStr = ct.targetAddr ?? '';
+      const addrLabel = kindLabel + ' \u2192 ' + targetStr;
+      const boxX = 1010, boxW = Math.max(220, addrLabel.length * 10 + 20);
+
+      gCallArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, stroke: color, 'stroke-width': '2', 'stroke-opacity': '0.7' }));
+
+      const inPage = ct.inPage !== false;
+      const rectAttrs = { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: color, 'fill-opacity': '0.12', stroke: color, 'stroke-width': '2' };
+      const tg = mk('g', { class: 'mp-annot-clickable' });
+      if (!inPage) { rectAttrs['data-nav-addr'] = targetStr; tg.setAttribute('data-nav-addr', targetStr); }
+      tg.appendChild(mk('rect', rectAttrs));
+      tg.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: color, 'font-family': 'monospace', 'font-size': '14' }, addrLabel));
+      gCallAnnot.appendChild(tg);
+
+      if (ct.symbol) {
+        gCallAnnot.appendChild(mk('text', {
+          x: boxX + boxW + 30, y: py + 5,
+          fill: '#c0a0ff', 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic'
+        }, ct.symbol));
+      }
+    }
+    this._svgEl.appendChild(gCallArrows); this._svgEl.appendChild(gCallAnnot);
 
     // Toolbar
     this._addrInputEl.value = this._data.pageAddr;

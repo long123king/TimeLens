@@ -500,6 +500,8 @@ export default class App {
       this.memoryLayoutView.onViewInPe = ({ base }) => this._openModuleInPe(base);
       this.memoryLayoutView.onViewInMemAccess = ({ base, end, label }) =>
         this._openMemAccessRange(base, end, 'W');
+      this.memoryLayoutView.onFetchModuleSections = (imageBase) =>
+        this.apiClient.getPe(imageBase);
       this.memoryLayoutView.setDisconnected();
     }
 

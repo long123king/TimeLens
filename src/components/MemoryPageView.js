@@ -22,6 +22,8 @@ export default class MemoryPageView {
     this._heapMap = new Map();
     this._astrMap = new Map();
     this._ustrMap = new Map();
+    this._callMap = new Map();
+    this._callByteOffsets = new Set();
   }
 
   setData(pageData) {
@@ -32,6 +34,8 @@ export default class MemoryPageView {
     this._heapMap.clear();
     this._astrMap.clear();
     this._ustrMap.clear();
+    this._callMap.clear();
+    this._callByteOffsets.clear();
     this._bytes = null;
 
     if (pageData?.available) {
@@ -45,6 +49,8 @@ export default class MemoryPageView {
       this._localMap = new Map((pageData.ptr2local ?? []).map((entry) => [entry.fromOffset, entry]));
       this._heapMap = new Map((pageData.ptr2heap ?? []).map((entry) => [entry.offset, entry]));
 
+      this._pageModule = this._resolvePageModule();
+
       for (const entry of (pageData.ptr2astr ?? [])) {
         const aligned = entry.offset & ~7;
         if (!this._astrMap.has(aligned)) this._astrMap.set(aligned, entry.text);
@@ -52,6 +58,14 @@ export default class MemoryPageView {
       for (const entry of (pageData.ptr2ustr ?? [])) {
         const aligned = entry.offset & ~7;
         if (!this._ustrMap.has(aligned)) this._ustrMap.set(aligned, entry.text);
+      }
+
+      for (const entry of (pageData.ptr2call ?? [])) {
+        this._callMap.set(entry.offset, entry);
+        const len = entry.instrLen || 5;
+        for (let j = 0; j < len; j++) {
+          this._callByteOffsets.add(entry.offset + j);
+        }
       }
     }
 
@@ -114,13 +128,34 @@ export default class MemoryPageView {
       + lo.toString(16).padStart(8, '0').toUpperCase();
   }
 
+  _resolvePageModule() {
+    for (const entry of this._symMap.values()) {
+      const bang = entry.symbol.indexOf('!');
+      if (bang >= 0) return entry.symbol.slice(0, bang).toLowerCase();
+    }
+    return '';
+  }
+
   _getAnnotation(offset) {
+    for (let b = 0; b < 8; b++) {
+      const call = this._callMap.get(offset + b);
+      if (call) {
+        const kind = call.kind || 'call';
+        const label = `${kind} \u2192 ${call.targetAddr || ''}`;
+        const sym = call.symbol || '';
+        const isJmp = kind === 'jmp' || kind === 'jmp8';
+        const callMod = sym ? (() => { const b = sym.indexOf('!'); return b >= 0 ? sym.slice(0, b).toLowerCase() : ''; })() : '';
+        const isXMod = callMod && this._pageModule && callMod !== this._pageModule;
+        return { kind: 'call', text: label, sym, isJmp, isXMod };
+      }
+    }
+
     const symbol = this._symMap.get(offset);
     if (symbol) return { kind: 'sym', text: symbol.symbol };
 
     const local = this._localMap.get(offset);
     if (local) {
-      return { kind: 'local', text: `→ +0x${local.toOffset.toString(16).padStart(3, '0')}` };
+      return { kind: 'local', text: `\u2192 +0x${local.toOffset.toString(16).padStart(3, '0')}` };
     }
 
     const heap = this._heapMap.get(offset);
@@ -129,12 +164,29 @@ export default class MemoryPageView {
     }
 
     const ascii = this._astrMap.get(offset);
-    if (ascii) return { kind: 'str', text: `"${ascii.slice(0, 48)}"` };
+    if (ascii) return { kind: 'str', text: `"${ascii.slice(0, 120)}"` };
 
     const unicode = this._ustrMap.get(offset);
-    if (unicode) return { kind: 'str', text: `L"${unicode.slice(0, 48)}"` };
+    if (unicode) return { kind: 'str', text: `L"${unicode.slice(0, 120)}"` };
 
     return null;
+  }
+
+  _highlightBytes(hexEl, offset) {
+    if (!this._bytes) return;
+
+    let html = '';
+    for (let b = 0; b < 8; b++) {
+      const byteOff = offset + b;
+      const val = this._bytes[byteOff];
+      const hex = val.toString(16).padStart(2, '0').toUpperCase();
+      if (this._callByteOffsets.has(byteOff)) {
+        html += `<span class="phl-call">${hex}</span>`;
+      } else {
+        html += hex;
+      }
+    }
+    hexEl.innerHTML = html;
   }
 
   _render() {
@@ -144,7 +196,7 @@ export default class MemoryPageView {
     if (!this._data?.available) {
       const empty = document.createElement('div');
       empty.className = 'page-empty';
-      empty.textContent = '—';
+      empty.textContent = '\u2014';
       this._container.appendChild(empty);
       return;
     }
@@ -173,12 +225,31 @@ export default class MemoryPageView {
 
       const hex = document.createElement('span');
       hex.className = 'page-cell page-hex';
-      hex.textContent = this._readQword(offset);
+      this._highlightBytes(hex, offset);
 
       const annot = document.createElement('span');
       annot.className = 'page-cell page-annot';
-      annot.textContent = annotation?.text ?? '';
-      if (annotation?.text) annot.title = annotation.text;
+
+      if (annotation?.kind === 'call') {
+        const tag = document.createElement('span');
+        tag.className = 'page-call-tag';
+        if (annotation.isJmp) tag.classList.add('page-call-jmp');
+        if (annotation.isXMod) tag.classList.add('page-call-xmod');
+        tag.textContent = annotation.text;
+        tag.title = annotation.text;
+        annot.appendChild(tag);
+
+        if (annotation.sym) {
+          const symText = document.createElement('span');
+          symText.className = 'page-call-sym';
+          symText.textContent = ' ' + annotation.sym;
+          symText.title = annotation.sym;
+          annot.appendChild(symText);
+        }
+      } else {
+        annot.textContent = annotation?.text ?? '';
+        if (annotation?.text) annot.title = annotation.text;
+      }
 
       row.append(addr, hex, annot);
       fragment.appendChild(row);

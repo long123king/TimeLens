@@ -414,10 +414,9 @@
 
     .page-row {
       display: grid;
-      grid-template-columns: 110px 140px minmax(140px, 1fr);
-      align-items: center;
-      min-height: 28px;
-      white-space: nowrap;
+      grid-template-columns: 160px 220px minmax(0, 1fr);
+      align-items: start;
+      min-height: auto;
     }
 
     .page-row:nth-child(odd) {
@@ -445,13 +444,55 @@
       background: #2a1600;
     }
 
-    .page-row.page-row-str {
+    .page-row    .page-row-str {
       background: #222200;
     }
 
+    .page-row-call {
+      background: rgba(30, 25, 50, 0.4);
+    }
+
+    .phl-call {
+      background: rgba(200, 170, 255, 0.35);
+      border-radius: 1px;
+      padding: 0 1px;
+      color: #d0c0ff;
+    }
+
+    .page-call-tag {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 600;
+      border-radius: 3px;
+      padding: 1px 5px;
+      vertical-align: middle;
+      white-space: nowrap;
+      color: #a0c8ff;
+      background: rgba(100, 160, 255, 0.12);
+      border: 1px solid rgba(100, 160, 255, 0.3);
+    }
+    .page-call-tag.page-call-jmp {
+      color: #a0e8a0;
+      background: rgba(100, 200, 100, 0.12);
+      border: 1px solid rgba(100, 200, 100, 0.3);
+    }
+    .page-call-tag.page-call-xmod {
+      color: #ffc090;
+      background: rgba(255, 160, 80, 0.15);
+      border: 1px solid rgba(255, 160, 80, 0.4);
+    }
+
+    .page-call-sym {
+      font-size: 10px;
+      font-style: italic;
+      color: #c0a0ff;
+      font-weight: 500;
+      white-space: normal;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+    }
+
     .page-cell {
-      overflow: hidden;
-      text-overflow: ellipsis;
       padding: 4px 8px;
       border-right: 1px solid #333333;
     }
@@ -462,14 +503,16 @@
 
     .page-addr {
       color: #8cbfd4;
+      font-size: 12px;
+      white-space: nowrap;
     }
-
     .page-row-rsp .page-addr {
       color: #ffb380;
     }
 
     .page-hex {
       color: #d8d8d8;
+      white-space: nowrap;
     }
 
     .page-row-rsp .page-hex {
@@ -478,6 +521,12 @@
 
     .page-annot {
       font-weight: 700;
+      white-space: normal;
+      word-break: break-all;
+      overflow-wrap: anywhere;
+      overflow: visible;
+      min-height: 22px;
+      line-height: 1.45;
     }
 
     .page-row-sym .page-annot {
@@ -2782,7 +2831,9 @@
 
       .mly-layout {
         display: grid;
-        grid-template-columns: minmax(180px, 18%) minmax(220px, 24%) minmax(240px, 24%) minmax(280px, 34%);
+        grid-template-columns:
+          minmax(100px, 11%) minmax(110px, 13%)
+          minmax(200px, 22%) minmax(460px, 54%);
         gap: 10px;
         height: 94%;
         min-height: 0;
@@ -3278,12 +3329,97 @@
         font-size: 11px;
       }
 
+      /* ── Enlarged Column Split (Stacks / Modules) ────────────────── */
+      .mly-enlarged-shell {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+      }
+
+      .mly-enlarged-group {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-top: 1px solid #253544;
+      }
+      .mly-enlarged-group:first-child {
+        border-top: 0;
+      }
+
+      .mly-enlarged-group-label {
+        padding: 4px 10px;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #7e95a8;
+        background: rgba(16, 24, 33, 0.95);
+        border-bottom: 1px solid #253544;
+        flex-shrink: 0;
+      }
+
+      .mly-enlarged-group-body {
+        display: flex;
+        gap: 8px;
+        padding: 6px;
+        min-height: 0;
+        flex: 1 1 auto;
+      }
+
+      .mly-enlarged-axis {
+        width: 70px;
+      }
+
+      .mly-enlarged-empty {
+        color: #5f7384;
+        font-size: 10px;
+        padding: 8px;
+      }
+
+      /* ── Merged Right Panel (Sections + Pages + Content) ──────────── */
+      .mly-merged-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: minmax(0, 1fr) minmax(0, 1.2fr);
+        gap: 6px;
+        height: 100%;
+        min-height: 0;
+      }
+      .mly-merged-sect {
+        grid-column: 1;
+        grid-row: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .mly-merged-pages {
+        grid-column: 2;
+        grid-row: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .mly-merged-content {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        min-height: 0;
+        overflow: hidden;
+        border-radius: 6px;
+      }
+
       .mly-overview-wrap {
         display: flex;
         gap: 12px;
         padding: 10px;
         min-height: 0;
         flex: 1 1 auto;
+      }
+
+      .mly-prop-wrap {
+        gap: 6px;
+      }
+
+      .mly-prop-axis {
+        width: 70px;
       }
 
       .mly-overview-axis {
@@ -3302,11 +3438,37 @@
       }
 
       .mly-axis-track {
+        position: relative;
         width: 2px;
         flex: 1;
         background: linear-gradient(180deg, #6f8493, #3f5667);
         margin: 8px 0;
+        margin-right: 10px;
         border-radius: 2px;
+      }
+
+      .mly-axis-break-label {
+        position: absolute;
+        right: 8px;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0;
+        font-size: 8px;
+        font-family: 'Consolas', 'Cascadia Code', monospace;
+        pointer-events: none;
+      }
+      .mly-axis-break-addr {
+        color: rgba(255, 255, 255, 0.38);
+        white-space: nowrap;
+        line-height: 1.2;
+      }
+      .mly-axis-break-sep {
+        color: rgba(255, 255, 255, 0.2);
+        font-size: 7px;
+        line-height: 1;
+        text-align: right;
+        padding-right: 2px;
       }
 
       .mly-overview-ribbon {
@@ -3456,14 +3618,19 @@
         position: absolute;
         left: 0;
         right: 0;
-        border: 0;
-        opacity: 0.78;
+        border: 1px solid rgba(0, 0, 0, 0.55);
+        outline: 1px solid rgba(0, 0, 0, 0.2);
+        outline-offset: -3px;
+        opacity: 0.95;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: flex-start;
         padding: 0 4px;
         overflow: hidden;
+        min-height: 3px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+        box-sizing: border-box;
       }
 
       .mly-global-strip-label {
@@ -3483,6 +3650,88 @@
       .mly-global-strip.selected {
         box-shadow: inset 0 0 0 2px #f8fafc;
         opacity: 1;
+      }
+
+      .mly-prop-strip {
+        min-height: 1px;
+        border-width: 0;
+        outline: none;
+        box-shadow: none;
+        opacity: 0.85;
+        border-radius: 1px;
+      }
+      .mly-prop-strip::after {
+        content: '';
+        position: absolute;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 0;
+        height: 0;
+        border-top: 3px solid transparent;
+        border-bottom: 3px solid transparent;
+        border-left: 4px solid rgba(255, 255, 255, 0.5);
+      }
+      .mly-prop-strip:hover {
+        opacity: 1;
+      }
+      .mly-prop-strip.selected {
+        z-index: 3;
+        opacity: 1;
+      }
+
+      .mly-global-break {
+        position: absolute;
+        left: 0;
+        right: 0;
+        pointer-events: none;
+        z-index: 2;
+        min-height: 10px;
+        overflow: hidden;
+        opacity: 0.7;
+      }
+      .mly-global-break::before {
+        content: '';
+        position: absolute;
+        left: 8px;
+        right: 8px;
+        top: 50%;
+        height: 10px;
+        transform: translateY(-50%);
+        background:
+          repeating-linear-gradient(60deg, transparent, transparent 2px, rgba(255,255,255,0.18) 2px, rgba(255,255,255,0.18) 3px),
+          repeating-linear-gradient(-50deg, transparent, transparent 3px, rgba(255,255,255,0.10) 3px, rgba(255,255,255,0.10) 4px),
+          repeating-linear-gradient(15deg, transparent, transparent 4px, rgba(255,255,255,0.06) 4px, rgba(255,255,255,0.06) 5px);
+        mask-image: linear-gradient(
+          0deg,
+          transparent 0%,
+          rgba(0,0,0,0.3) 15%,
+          rgba(0,0,0,0.9) 50%,
+          rgba(0,0,0,0.3) 85%,
+          transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+          0deg,
+          transparent 0%,
+          rgba(0,0,0,0.3) 15%,
+          rgba(0,0,0,0.9) 50%,
+          rgba(0,0,0,0.3) 85%,
+          transparent 100%
+        );
+      }
+      .mly-global-break::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 50%;
+        height: 1px;
+        transform: translateY(-50%);
+        background: rgba(255,255,255,0.15);
+        box-shadow: 0 3px 0 rgba(255,255,255,0.04),
+                    0 -3px 0 rgba(255,255,255,0.04),
+                    0 5px 0 rgba(255,255,255,0.02),
+                    0 -5px 0 rgba(255,255,255,0.02);
       }
 
       .mly-type-legend {
@@ -3644,7 +3893,7 @@
         overflow: auto;
         padding: 10px;
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(16px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(22px, 1fr));
         gap: 3px;
         align-content: start;
         border-bottom: 1px solid #2b3e50;
@@ -3670,17 +3919,17 @@
 
       .mly-page-cell-label {
         position: absolute;
-        left: 2px;
-        right: 2px;
+        left: 1px;
+        right: 1px;
         top: 50%;
         transform: translateY(-50%);
-        font-size: 8px;
+        font-size: 7px;
         line-height: 1;
-        color: rgba(255, 255, 255, 0.82);
+        color: rgba(255, 255, 255, 0.85);
         text-align: center;
         white-space: nowrap;
         overflow: hidden;
-        text-overflow: ellipsis;
+        text-overflow: clip;
       }
 
       .mly-grid-note {
@@ -3780,9 +4029,177 @@
         opacity: 0.35;
       }
 
+      /* ── Column 2: Modules & Stacks List ──────────────────────────── */
+      .mly-modstack-list {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      .mly-modstack-item {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(20, 30, 40, 0.86);
+        border: 1px solid #304355;
+        border-left: 4px solid #6c757d;
+        border-radius: 4px;
+        padding: 7px 8px;
+        color: #d3dfe8;
+        font-family: inherit;
+        font-size: 11px;
+        text-align: left;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      .mly-modstack-item:hover {
+        background: rgba(36, 54, 69, 0.93);
+      }
+
+      .mly-modstack-item.selected {
+        box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+        background: rgba(35, 55, 72, 0.96);
+      }
+
+      .mly-modstack-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        padding: 2px 6px;
+        font-size: 9px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #fff;
+        font-weight: 700;
+        flex-shrink: 0;
+        min-width: 34px;
+      }
+
+      .mly-modstack-info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        overflow: hidden;
+      }
+
+      .mly-modstack-name {
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #edf4fa;
+      }
+
+      .mly-modstack-addr {
+        font-size: 9px;
+        color: #7e95a8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* ── Column 3: Sections / Permission Clusters ─────────────────── */
+      .mly-sect-body {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        padding: 6px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .mly-sect-item {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(20, 30, 40, 0.86);
+        border: 1px solid #304355;
+        border-left: 4px solid #6c757d;
+        border-radius: 4px;
+        padding: 7px 8px;
+        color: #d3dfe8;
+        font-family: inherit;
+        font-size: 11px;
+        text-align: left;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      .mly-sect-item:hover {
+        background: rgba(36, 54, 69, 0.93);
+      }
+
+      .mly-sect-item.selected {
+        box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+        background: rgba(35, 55, 72, 0.96);
+      }
+
+      .mly-sect-perm {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 3px;
+        padding: 2px 8px;
+        font-size: 10px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #fff;
+        font-weight: 700;
+        flex-shrink: 0;
+        min-width: 28px;
+      }
+
+      .mly-sect-name {
+        flex: 1;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: #edf4fa;
+      }
+
+      .mly-sect-range {
+        font-size: 9px;
+        color: #7e95a8;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      .mly-sect-empty {
+        color: #7f94a7;
+        font-size: 11px;
+        padding: 12px;
+        text-align: center;
+      }
+
+      .mly-sect-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 24px 12px;
+        color: #8da4b5;
+        font-size: 11px;
+      }
+
       @media (max-width: 1400px) {
         .mly-layout {
-          grid-template-columns: minmax(170px, 20%) minmax(210px, 24%) minmax(230px, 24%) minmax(250px, 32%);
+          grid-template-columns:
+            minmax(90px, 10%) minmax(100px, 12%)
+            minmax(180px, 22%) minmax(320px, 56%);
         }
 
         .env-layout {

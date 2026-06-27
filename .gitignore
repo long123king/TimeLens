@@ -1,8 +1,10 @@
 node_modules/
 dist/
 .vite/
+.DS_Store
 tmpclaude-*
 tmpclaude-*/
+未命名/
 demo.html
 WindowsTerminal.exe_page_*.svg
 *.dmp
@@ -10,4 +12,4 @@ WindowsTerminal.exe_page_*.svg
 *.etl
 *.evtx
 *.md
-!README.md
+!README.md未命名/
