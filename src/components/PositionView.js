@@ -4,22 +4,27 @@
  * Opened by clicking a row in Mem Access.
  */
 
+import MemoryPageSvgView from './MemoryPageSvgView.js';
+
 export default class PositionView {
   constructor(container) {
     this._container = container;
     this._position = null;      // { major, minor, threadId }
 
     // Callbacks set by App
-    this.onFetchCallstack = null;  // async ({ major, minor, threadId }) => frames[]
-    this.onFetchRegisters = null;  // async ({ major, minor, threadId }) => registers{}
-    this.onFetchStackSvg  = null;  // async ({ major, minor, threadId, rsp }) => svgText
+    this.onFetchCallstack = null;    // async ({ major, minor, threadId }) => frames[]
+    this.onFetchRegisters = null;    // async ({ major, minor, threadId }) => registers{}
+    this.onFetchPageRender  = null;  // async ({ major, minor, threadId, address }) => pageRenderData
 
     this._buildShell();
   }
 
-  setActive(_active) {}
+  setActive(active) {
+    this._embeddedPageView?.setActive(active);
+  }
   setDisconnected() {
     this._renderPlaceholder('◎', 'Not connected to a debug session.');
+    this._embeddedPageView?.setDisconnected();
   }
 
   /**
@@ -41,8 +46,9 @@ export default class PositionView {
 
     // Defer stack memory fetch (needs RSP from registers)
     if (registers?.rsp) {
-      const svg = await this._fetchStackSvg(registers.rsp);
-      this._renderStackSvg(svg);
+      const pageData = await this._fetchPageRender(registers.rsp);
+      this._embeddedPageView.setData(pageData);
+      this._stackMetaEl.textContent = pageData?.available ? 'RSP page' : 'unavailable';
     }
   }
 
@@ -98,6 +104,9 @@ export default class PositionView {
     this._registersEl = this._container.querySelector('#pv-registers');
     this._stackMetaEl = this._container.querySelector('#pv-stack-meta');
     this._stackSvgEl = this._container.querySelector('#pv-stack-svg');
+
+    this._embeddedPageView = new MemoryPageSvgView(this._stackSvgEl);
+    this._embeddedPageView.onNavigate = (address) => this._navigateEmbeddedPage(address);
   }
 
   _showLoading() {
@@ -171,21 +180,10 @@ export default class PositionView {
 
   // --- Stack memory ---
 
-  async _renderStackSvg(svgText) {
-    if (!svgText) {
-      this._stackMetaEl.textContent = 'unavailable';
-      this._stackSvgEl.innerHTML = '<div class="pv-empty">Stack page unavailable</div>';
-      return;
-    }
-    this._stackMetaEl.textContent = `RSP page`;
-    this._stackSvgEl.innerHTML = svgText;
-    const svgEl = this._stackSvgEl.querySelector('svg');
-    if (svgEl) {
-      svgEl.style.maxWidth = '100%';
-      svgEl.style.height = 'auto';
-      svgEl.removeAttribute('width');
-      svgEl.removeAttribute('height');
-    }
+  async _navigateEmbeddedPage(address) {
+    if (!this._position) return;
+    const pageData = await this._fetchPageRender(address);
+    this._embeddedPageView.setData(pageData);
   }
 
   // --- Fetch helpers ---
@@ -210,13 +208,13 @@ export default class PositionView {
     }
   }
 
-  async _fetchStackSvg(rsp) {
+  async _fetchPageRender(address) {
     try {
       const { major, minor, threadId } = this._position;
-      return await this.onFetchStackSvg?.({ major, minor, threadId, rsp });
+      return await this.onFetchPageRender?.({ major, minor, threadId, address });
     } catch (e) {
-      console.error('[PV] stack svg fetch failed:', e);
-      return null;
+      console.error('[PV] page render fetch failed:', e);
+      return { available: false };
     }
   }
 

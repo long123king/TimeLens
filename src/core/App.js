@@ -3,6 +3,7 @@ import Viewport from './Viewport.js';
 import Timeline from '../components/Timeline.js';
 import MemoryView from '../components/MemoryView.js';
 import MemoryPageView from '../components/MemoryPageView.js';
+import MemoryPageSvgView from '../components/MemoryPageSvgView.js';
 import Controls from '../components/Controls.js';
 import ApiClient from '../api/ApiClient.js';
 import ConnectionMonitor from '../api/ConnectionMonitor.js';
@@ -19,7 +20,7 @@ import MemAccessView from '../components/MemAccessView.js';
 import FlameGraphView from '../components/FlameGraphView.js';
 import QueueView from '../components/QueueView.js';
 import PositionView from '../components/PositionView.js';
-import MemoryPageSvgView from '../components/MemoryPageSvgView.js';
+import { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from '../utils/ZoomController.js';
 
 const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timelineHeight
 
@@ -44,7 +45,7 @@ export default class App {
       currentPosition: null,
       isPlaying: false,
       playbackSpeed: 1,
-      zoomLevel: 0,
+      zoomLevel: MIN_ZOOM_LEVEL,
       selectedAddress: null,
       memoryData: null,
       events: [],
@@ -253,12 +254,12 @@ export default class App {
     }
 
     _openMemAccessRange(startAddrHex, endAddrHex, mode = 'R') {
-      // Clamp to 32-byte max range
+      // Clamp to 4-byte max range
       try {
         const start = BigInt(startAddrHex);
         const end = BigInt(endAddrHex);
-        if (end - start > 0x20n) {
-          endAddrHex = '0x' + (start + 0x20n).toString(16);
+        if (end - start > 0x4n) {
+          endAddrHex = '0x' + (start + 0x4n).toString(16);
         }
       } catch { /* keep original values if parse fails */ }
 
@@ -470,7 +471,7 @@ export default class App {
     this.controls.onZoom = (direction) => this.handleZoomControl(direction);
     this.controls.onViewToggle = (view, enabled) => this.handleViewToggle(view, enabled);
 
-      // Memory page view (DOM text panel in right dock)
+      // Memory page view (text list in right dock)
       const pageContainer = document.getElementById('page-canvas');
       if (pageContainer) {
         this.memoryPageView = new MemoryPageView(pageContainer);
@@ -580,11 +581,10 @@ export default class App {
           { major: String(major), minor: Number(minor) });
         return data?.registers ?? {};
       };
-      this.positionView.onFetchStackSvg = async ({ major, minor, threadId, rsp }) => {
-        const dark = this.getPageSvgTheme() === 'dark';
-        return await this.apiClient.getPageSvg({
+      this.positionView.onFetchPageRender = async ({ major, minor, threadId, address }) => {
+        return await this.apiClient.getPageRender({
           major: String(major), minor: Number(minor),
-          threadId, address: String(rsp), dark,
+          threadId, address: String(address),
         });
       };
       this.positionView.setDisconnected();
@@ -795,12 +795,12 @@ export default class App {
     if (!this.state.traceInfo?.available || !this.memoryPageView) return;
     try {
       const position = this.getCurrentTracePosition(positionOverride);
-      const pageData = await this.dataManager.fetchPage(
-        Math.floor(time),
-        this.state.activeThreadId,
-        position,
-      );
-      this.memoryPageView.setData(pageData);
+      const data = await this.apiClient.getPageRender({
+        major: position?.major,
+        minor: position?.minor,
+        threadId: this.state.activeThreadId,
+      });
+      this.memoryPageView.setData(data);
     } catch {
       // page route may not be available on all backends
     }
@@ -1023,13 +1023,13 @@ export default class App {
   handleZoomControl(direction) {
     if (direction === 'in') {
       this.viewport.zoom(1.5, this.viewport.width / 2, this.viewport.height / 2);
-      this.state.zoomLevel = Math.min(4, this.state.zoomLevel + 1);
+      this.state.zoomLevel = Math.min(MAX_ZOOM_LEVEL, this.state.zoomLevel + 1);
     } else if (direction === 'out') {
       this.viewport.zoom(0.67, this.viewport.width / 2, this.viewport.height / 2);
-      this.state.zoomLevel = Math.max(0, this.state.zoomLevel - 1);
+      this.state.zoomLevel = Math.max(MIN_ZOOM_LEVEL, this.state.zoomLevel - 1);
     } else if (direction === 'reset') {
       this.viewport.resetCamera();
-      this.state.zoomLevel = 0;
+      this.state.zoomLevel = MIN_ZOOM_LEVEL;
     }
 
     this.updateInfoPanel();

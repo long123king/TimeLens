@@ -1,15 +1,23 @@
 /**
  * ZoomController - Manages multi-level zoom logic
  */
+const MIN_ZOOM_LEVEL = 0;
+const MAX_ZOOM_LEVEL = 4;
+
+export { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL };
+
 export default class ZoomController {
   constructor() {
     this.levels = [
-      { name: 'Process', scale: 1, description: 'Entire process memory' },
-      { name: 'Region', scale: 16, description: 'Memory regions (64KB blocks)' },
-      { name: 'Page', scale: 256, description: 'Memory pages (4KB)' },
-      { name: 'Byte', scale: 4096, description: 'Individual bytes' },
-      { name: 'Bit', scale: 32768, description: 'Bit level view' },
+      { name: 'Process', scale: 1 / 256, description: 'Entire process memory' },
+      { name: 'Region', scale: 1 / 16, description: 'Memory regions (64KB blocks)' },
+      { name: 'Page', scale: 1.0, description: 'Memory pages (4KB)' },
+      { name: 'Byte', scale: 16, description: 'Individual bytes' },
+      { name: 'Bit', scale: 128, description: 'Bit level view' },
     ];
+
+    this.minLevel = 0;
+    this.maxLevel = this.levels.length - 1;
 
     this.currentLevel = 0;
   }
@@ -27,7 +35,7 @@ export default class ZoomController {
   }
 
   zoomIn() {
-    if (this.currentLevel < this.levels.length - 1) {
+    if (this.currentLevel < this.maxLevel) {
       this.currentLevel++;
       return true;
     }
@@ -35,7 +43,7 @@ export default class ZoomController {
   }
 
   zoomOut() {
-    if (this.currentLevel > 0) {
+    if (this.currentLevel > this.minLevel) {
       this.currentLevel--;
       return true;
     }
@@ -43,7 +51,7 @@ export default class ZoomController {
   }
 
   setLevel(level) {
-    if (level >= 0 && level < this.levels.length) {
+    if (level >= this.minLevel && level <= this.maxLevel) {
       this.currentLevel = level;
       return true;
     }
@@ -51,6 +59,6 @@ export default class ZoomController {
   }
 
   reset() {
-    this.currentLevel = 0;
+    this.currentLevel = this.minLevel;
   }
 }

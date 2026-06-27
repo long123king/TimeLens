@@ -25,7 +25,7 @@ export default class MemoryPageSvgView {
 
     // dk.dll CoordinatesManager constants
     this._GW = 40; this._GH = 30; this._AW = 220; this._OX = 100; this._OY = 100;
-    this._zoomScale = 1.0;
+    this._zoomScale = 1.5;
     this._buildShell();
   }
 
@@ -90,8 +90,10 @@ export default class MemoryPageSvgView {
       '    </form>',
       '    <span id="mp-page-info" class="mp-page-info"></span>',
       '    <div class="mp-toolbar-spacer"></div>',
-      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.0\u00D7</span>',
-      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1">',
+      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.50\u00D7</span>',
+      '    <span class="mp-zoom-min-label">1.0</span>',
+      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1.5">',
+      '    <span class="mp-zoom-max-label">2.0</span>',
       '    <button id="mp-btn-theme" class="mp-btn small" type="button">\u263E</button>',
       '  </div>',
       '  <div id="mp-history-row" class="mp-history-row"></div>',
@@ -124,7 +126,7 @@ export default class MemoryPageSvgView {
       this._zoomScale = parseFloat(this._zoomSliderEl.value);
       this._applyZoom();
     });
-    this._zoomLabelEl.addEventListener('click', () => { this._zoomScale = 1.0; this._applyZoom(); });
+    this._zoomLabelEl.addEventListener('click', () => { this._zoomScale = 1.5; this._applyZoom(); });
     this._container.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT') return;
       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); this._zoom(0.25); return; }
@@ -185,6 +187,9 @@ export default class MemoryPageSvgView {
     defs.appendChild(this._arrowhead(NS, 'arrowheadr', arrowC, arrowO));
     defs.appendChild(this._arrowhead(NS, 'arrowheadg', localC, arrowO));
     defs.appendChild(this._arrowhead(NS, 'arrowheadb', heapC, arrowO));
+    defs.appendChild(this._arrowhead(NS, 'arrowheadCall', '#a0c8ff', 0.7));
+    defs.appendChild(this._arrowhead(NS, 'arrowheadJmp', '#a0e8a0', 0.7));
+    defs.appendChild(this._arrowhead(NS, 'arrowheadXmod', '#ffc090', 0.7));
     this._svgEl.appendChild(defs);
 
     const addrBig = BigInt(this._data.pageAddr);
@@ -337,7 +342,7 @@ export default class MemoryPageSvgView {
     }
     for (const [off, texts] of strMap) {
       const row = off / 8 | 0;
-      gStr.appendChild(mk('text', { x: 1400, y: OY + row * GH + GH / 2 + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, texts.join(' | ')));
+      gStr.appendChild(mk('text', { x: 1400, y: OY + row * GH + GH / 2 + 5, fill: '#ffff00', 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, texts.join(' | ')));
     }
 
     this._svgEl.appendChild(gArrows); this._svgEl.appendChild(gAnnot); this._svgEl.appendChild(gStr);
@@ -348,9 +353,50 @@ export default class MemoryPageSvgView {
     const xmodC = '#ffc090';
     const gCallArrows = mk('g'); const gCallAnnot = mk('g');
 
+    const rowCalls = new Map();
     for (const ct of (this._callItems ?? [])) {
       const row = ct.offset / 8 | 0;
-      const py = OY + row * GH + GH / 2;
+      if (!rowCalls.has(row)) rowCalls.set(row, []);
+      rowCalls.get(row).push(ct);
+    }
+
+    const displayOccupied = new Set(rowCalls.keys());
+    const nearestEmpty = (srcRow) => {
+      for (let dist = 1; dist < 50; dist++) {
+        const below = srcRow + dist;
+        if (!displayOccupied.has(below)) { displayOccupied.add(below); return below; }
+        const above = srcRow - dist;
+        if (!displayOccupied.has(above)) { displayOccupied.add(above); return above; }
+      }
+      return srcRow;
+    };
+
+    const assignments = [];
+    for (const [srcRow, cts] of rowCalls) {
+      for (let i = 0; i < cts.length; i++) {
+        const displayRow = i === 0 ? srcRow : nearestEmpty(srcRow);
+        assignments.push({ ct: cts[i], srcRow, displayRow });
+      }
+    }
+
+    const displayCounts = new Map();
+    for (const a of assignments) {
+      displayCounts.set(a.displayRow, (displayCounts.get(a.displayRow) ?? 0) + 1);
+    }
+    const displayIdx = new Map();
+
+    for (const a of assignments) {
+      const count = displayCounts.get(a.displayRow) ?? 1;
+      const idx = displayIdx.get(a.displayRow) ?? 0;
+      displayIdx.set(a.displayRow, idx + 1);
+
+      const multi = count > 1;
+      const spacing = multi ? GH / (count + 1) : 0;
+      const yOff = multi ? (idx + 1) * spacing - GH / 2 : 0;
+      const pySrc = OY + a.srcRow * GH + GH / 2;
+      const pyDst = OY + a.displayRow * GH + GH / 2 + yOff;
+
+      const ct = a.ct;
       const isJmp = (ct.kind === 'jmp' || ct.kind === 'jmp8');
       const callMod = ct.symbol ? (() => { const b = ct.symbol.indexOf('!'); return b >= 0 ? ct.symbol.slice(0, b).toLowerCase() : ''; })() : '';
       const isXMod = callMod && this._pageModule && callMod !== this._pageModule;
@@ -363,20 +409,27 @@ export default class MemoryPageSvgView {
       const addrLabel = kindLabel + ' \u2192 ' + targetStr;
       const boxX = 1010, boxW = Math.max(220, addrLabel.length * 10 + 20);
 
-      gCallArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, stroke: color, 'stroke-width': '2', 'stroke-opacity': '0.7' }));
+      let markerId = 'arrowheadCall';
+      if (isXMod) markerId = 'arrowheadXmod';
+      else if (isJmp) markerId = 'arrowheadJmp';
+
+      gCallArrows.appendChild(mk('line', { x1: gridRight, y1: pySrc, x2: 1000, y2: pyDst, stroke: color, 'stroke-width': '2', 'stroke-opacity': '0.7', 'marker-end': `url(#${markerId})` }));
 
       const inPage = ct.inPage !== false;
-      const rectAttrs = { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: color, 'fill-opacity': '0.12', stroke: color, 'stroke-width': '2' };
+      const labelFontSize = multi ? 11 : 14;
+      const symFontSize = multi ? 10 : 12;
+      const rectH = multi ? spacing * 0.85 : GH;
+      const rectAttrs = { x: boxX, y: pyDst - rectH / 2, width: boxW, height: rectH, fill: color, 'fill-opacity': '0.12', stroke: color, 'stroke-width': '2' };
       const tg = mk('g', { class: 'mp-annot-clickable' });
       if (!inPage) { rectAttrs['data-nav-addr'] = targetStr; tg.setAttribute('data-nav-addr', targetStr); }
       tg.appendChild(mk('rect', rectAttrs));
-      tg.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: color, 'font-family': 'monospace', 'font-size': '14' }, addrLabel));
+      tg.appendChild(mk('text', { x: boxX + 10, y: pyDst + 5, fill: color, 'font-family': 'monospace', 'font-size': String(labelFontSize) }, addrLabel));
       gCallAnnot.appendChild(tg);
 
       if (ct.symbol) {
         gCallAnnot.appendChild(mk('text', {
-          x: boxX + boxW + 30, y: py + 5,
-          fill: '#c0a0ff', 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic'
+          x: boxX + boxW + 30, y: pyDst + 5,
+          fill: '#c0a0ff', 'font-family': 'monospace', 'font-size': String(symFontSize), 'font-style': 'italic'
         }, ct.symbol));
       }
     }
