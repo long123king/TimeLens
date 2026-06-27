@@ -5,6 +5,9 @@
  *   CSvgGrids for addr, hex, ascii + per-row bitmap strips + annotation arrows.
  */
 export default class MemoryPageSvgView {
+  _HISTORY_KEY = 'mp-address-history';
+  _MAX_HISTORY = 8;
+
   constructor(container) {
     this._container = container;
     this._data = null;
@@ -13,12 +16,14 @@ export default class MemoryPageSvgView {
     this._selectedOffset = -1;
     this._hoveredOffset = -1;
     this._categories = null;
+    this._history = this._loadHistory();
 
     this.onNavigate = null;
     this.onClickAnnotationAddr = null;
 
     // dk.dll CoordinatesManager constants
     this._GW = 40; this._GH = 30; this._AW = 220; this._OX = 100; this._OY = 100;
+    this._zoomScale = 1.0;
     this._buildShell();
   }
 
@@ -63,8 +68,11 @@ export default class MemoryPageSvgView {
       '    </form>',
       '    <span id="mp-page-info" class="mp-page-info"></span>',
       '    <div class="mp-toolbar-spacer"></div>',
+      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.0\u00D7</span>',
+      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1">',
       '    <button id="mp-btn-theme" class="mp-btn small" type="button">\u263E</button>',
       '  </div>',
+      '  <div id="mp-history-row" class="mp-history-row"></div>',
       '</div>',
       '<div class="mp-body">',
       '  <div id="mp-placeholder" class="mp-placeholder"><div class="mp-placeholder-icon">\u25C8</div><div>Load a page to begin.</div></div>',
@@ -78,6 +86,9 @@ export default class MemoryPageSvgView {
     this._detailBodyEl = this._container.querySelector('#mp-detail-body');
     this._addrInputEl = this._container.querySelector('#mp-addr-input');
     this._pageInfoEl = this._container.querySelector('#mp-page-info');
+    this._historyRowEl = this._container.querySelector('#mp-history-row');
+    this._zoomLabelEl = this._container.querySelector('#mp-zoom-label');
+    this._zoomSliderEl = this._container.querySelector('#mp-zoom-slider');
 
     this._container.querySelector('#mp-btn-prev').addEventListener('click', () => this._step(-1));
     this._container.querySelector('#mp-btn-next').addEventListener('click', () => this._step(1));
@@ -87,8 +98,15 @@ export default class MemoryPageSvgView {
       this.setTheme(n);
       this._container.querySelector('#mp-btn-theme').textContent = n === 'dark' ? '\u263E' : '\u2600';
     });
+    this._zoomSliderEl.addEventListener('input', () => {
+      this._zoomScale = parseFloat(this._zoomSliderEl.value);
+      this._applyZoom();
+    });
+    this._zoomLabelEl.addEventListener('click', () => { this._zoomScale = 1.0; this._applyZoom(); });
     this._container.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT') return;
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); this._zoom(0.25); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') { e.preventDefault(); this._zoom(-0.25); return; }
       if (e.key === 'PageUp') { e.preventDefault(); this._step(-1); }
       if (e.key === 'PageDown') { e.preventDefault(); this._step(1); }
     });
@@ -96,9 +114,9 @@ export default class MemoryPageSvgView {
       const c = e.target.closest('[data-offset]');
       if (c) this._select(parseInt(c.getAttribute('data-offset'), 10));
       const a = e.target.closest('[data-nav-addr]');
-      if (a) { const addr = a.getAttribute('data-nav-addr'); if (addr && this.onNavigate) this.onNavigate(addr); return; }
+      if (a) { const addr = a.getAttribute('data-nav-addr'); if (addr) this._goto(addr); return; }
       const b = e.target.closest('[data-target-addr]');
-      if (b) { const addr = b.getAttribute('data-target-addr'); if (addr && this.onClickAnnotationAddr) this.onClickAnnotationAddr(addr); }
+      if (b) { const addr = b.getAttribute('data-target-addr'); if (addr) this._goto(addr); }
     };
     this._svgEl.addEventListener('click', svgClick);
     this._svgEl.addEventListener('mouseover', e => {
@@ -106,6 +124,8 @@ export default class MemoryPageSvgView {
       this._hover(c ? parseInt(c.getAttribute('data-offset'), 10) : -1);
     });
     this._svgEl.addEventListener('mouseleave', () => this._hover(-1));
+
+    this._renderHistorySlots();
   }
 
   // ---- render (mirrors visual_page) ----
@@ -132,7 +152,7 @@ export default class MemoryPageSvgView {
     const NS = 'http://www.w3.org/2000/svg';
     this._svgEl.innerHTML = '';
     this._svgEl.setAttribute('viewBox', `0 0 ${canvasW} ${canvasH}`);
-    this._svgEl.style.width = '100%'; this._svgEl.style.height = 'auto';
+    this._applyZoom();
     const mk = (t, a = {}, txt = '') => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (txt) e.textContent = txt; return e; };
 
     // Background
@@ -334,11 +354,48 @@ export default class MemoryPageSvgView {
   }
 
   _step(d) { if (!this._data?.pageAddr) return; try { const n = BigInt(this._data.pageAddr) + BigInt(d) * 0x1000n; if (n >= 0n) this._goto('0x' + n.toString(16)); } catch {} }
-  _goto(r) { const t = String(r ?? '').trim(); if (!t) return; try { BigInt(t); if (this.onNavigate) this.onNavigate(t); } catch {} }
+  _goto(r) { const t = String(r ?? '').trim(); if (!t) return; try { BigInt(t); this._recordHistory(t); if (this.onNavigate) this.onNavigate(t); } catch {} }
   _renderPlaceholder(icon, text) {
     this._placeholderEl.style.display = 'flex'; this._svgEl.style.display = 'none'; this._detailEl.style.display = 'none';
     const i = this._placeholderEl.querySelector('.mp-placeholder-icon'); if (i) i.textContent = icon;
     const t = i?.nextElementSibling; if (t) t.textContent = text;
   }
   _esc(v) { return String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  _zoom(delta) {
+    const next = Math.min(2.0, Math.max(1.0, this._zoomScale + delta));
+    if (next === this._zoomScale) return;
+    this._zoomScale = next;
+    this._applyZoom();
+  }
+  _applyZoom() {
+    this._svgEl.style.width = (100 * this._zoomScale) + '%';
+    this._svgEl.style.height = 'auto';
+    if (this._zoomLabelEl) this._zoomLabelEl.textContent = this._zoomScale.toFixed(2) + '\u00D7';
+    if (this._zoomSliderEl) this._zoomSliderEl.value = this._zoomScale;
+  }
+
+  _loadHistory() {
+    try { const raw = localStorage.getItem(this._HISTORY_KEY); return raw ? JSON.parse(raw) : []; } catch { return []; }
+  }
+  _recordHistory(addr) {
+    this._history = this._history.filter(a => a !== addr);
+    this._history.unshift(addr);
+    if (this._history.length > this._MAX_HISTORY) this._history.length = this._MAX_HISTORY;
+    try { localStorage.setItem(this._HISTORY_KEY, JSON.stringify(this._history)); } catch {}
+    this._renderHistorySlots();
+  }
+  _renderHistorySlots() {
+    if (!this._historyRowEl) return;
+    const len = this._history.length;
+    this._historyRowEl.innerHTML = this._history.map((addr, i) => {
+      const isCurrent = i === 0;
+      const cls = 'mp-history-slot mp-btn small' + (isCurrent ? ' mp-history-slot-current' : '');
+      const opacity = isCurrent ? 1 : Math.max(0.35, 1 - (i / (len || 1)) * 0.65);
+      return `<button class="${cls}" data-addr="${addr}" title="${addr}" style="opacity:${opacity.toFixed(2)}">${addr}</button>`;
+    }).join('');
+    this._historyRowEl.querySelectorAll('.mp-history-slot').forEach(btn => {
+      btn.addEventListener('click', () => this._goto(btn.dataset.addr));
+    });
+  }
 }

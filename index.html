@@ -33,7 +33,6 @@
     #app[data-active-tab="command"] #pixi-canvas,
     #app[data-active-tab="function"] #pixi-canvas,
     #app[data-active-tab="page"] #pixi-canvas,
-    #app[data-active-tab="pagesvg"] #pixi-canvas,
     #app[data-active-tab="memorylayout"] #pixi-canvas,
     #app[data-active-tab="environment"] #pixi-canvas,
     #app[data-active-tab="model"] #pixi-canvas,
@@ -252,7 +251,6 @@
 
     #app[data-active-tab="command"] #right-dock,
     #app[data-active-tab="page"] #right-dock,
-    #app[data-active-tab="pagesvg"] #right-dock,
     #app[data-active-tab="memorylayout"] #right-dock,
     #app[data-active-tab="environment"] #right-dock,
     #app[data-active-tab="model"] #right-dock,
@@ -748,25 +746,6 @@
         right: calc(var(--right-dock-width) + 20px);
       }
 
-      #page-workspace {
-        position: absolute;
-        top: calc(10px + var(--header-height));
-        left: 10px;
-        right: 10px;
-        bottom: 10px;
-        display: none;
-        flex-direction: column;
-        min-height: 0;
-        border: 2px solid #2d4a5a;
-        border-radius: 6px;
-        background: rgba(14, 20, 26, 0.96);
-        box-shadow: inset 0 0 1px rgba(78, 201, 176, 0.06), 0 8px 24px rgba(0, 0, 0, 0.4);
-        overflow: hidden;
-      }
-
-      #app[data-active-tab="page"] #page-workspace {
-        display: flex;
-      }
 
 
       #pagesvg-workspace {
@@ -784,7 +763,7 @@
         overflow: hidden;
       }
 
-      #app[data-active-tab="pagesvg"] #pagesvg-workspace {
+      #app[data-active-tab="page"] #pagesvg-workspace {
         display: flex;
         flex-direction: column;
       }
@@ -820,6 +799,17 @@
 
       .mp-toolbar-spacer { flex: 1; }
 
+      .mp-history-row {
+        display: flex; align-items: center; gap: 4px;
+        padding-top: 4px; flex-wrap: wrap;
+      }
+      .mp-history-slot {
+        font-size: 11px; padding: 2px 8px;
+      }
+      .mp-history-slot-current {
+        border-color: #5aaa7a; background: rgba(40, 100, 80, 0.6);
+      }
+
       .mp-toggle {
         display: flex; align-items: center; gap: 4px;
         color: #8a9a7a; font-size: 11px; cursor: pointer;
@@ -833,8 +823,31 @@
       .mp-btn:hover { background: rgba(50, 70, 50, 0.9); }
       .mp-btn.primary { background: rgba(40, 100, 80, 0.6); border-color: #5aaa7a; }
 
+      .mp-zoom-label {
+        font-size: 11px; color: #7a9a6a; font-family: monospace;
+        cursor: pointer; user-select: none; white-space: nowrap;
+        min-width: 44px; text-align: right;
+      }
+      .mp-zoom-slider {
+        width: 80px; height: 4px;
+        -webkit-appearance: none; appearance: none;
+        background: #2a3a2a; border-radius: 2px; outline: none;
+        cursor: pointer;
+      }
+      .mp-zoom-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #5aaa7a; border: 1px solid #3a6a4a;
+        cursor: pointer;
+      }
+      .mp-zoom-slider::-moz-range-thumb {
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #5aaa7a; border: 1px solid #3a6a4a;
+        cursor: pointer;
+      }
+
       .mp-body {
-        position: absolute; top: 40px; bottom: 0; left: 0; right: 0;
+        position: absolute; top: 66px; bottom: 0; left: 0; right: 0;
         overflow-y: auto; overflow-x: auto;
       }
 
@@ -3820,208 +3833,6 @@
         }
       }
 
-      #page-workspace-toolbar {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 10px;
-        padding: 10px 14px;
-        border-bottom: 1px solid #2a3a44;
-        background: linear-gradient(180deg, rgba(20, 30, 38, 0.98), rgba(16, 24, 30, 0.96));
-        flex-shrink: 0;
-      }
-
-      #page-workspace-title {
-        font-size: 12px;
-        color: #7fc0f0;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: 700;
-      }
-
-      #page-workspace-meta {
-        font-size: 11px;
-        color: #5a7a8a;
-        flex: 1;
-      }
-
-      #btn-page-reload {
-        padding: 5px 12px;
-        font-size: 11px;
-        background: rgba(14, 99, 156, 0.28);
-        color: #9cdcfe;
-        border: 1px solid rgba(14, 99, 156, 0.5);
-        border-radius: 4px;
-        cursor: pointer;
-        letter-spacing: 0.03em;
-      }
-
-      #btn-page-reload:hover {
-        background: rgba(14, 99, 156, 0.5);
-        color: #fff;
-      }
-
-      #page-address-form {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-
-      #page-current-address {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 3px 8px;
-        border-radius: 4px;
-        border: 1px solid rgba(255, 213, 79, 0.42);
-        background: rgba(255, 213, 79, 0.14);
-        color: #ffe48f;
-        font-size: 11px;
-        font-family: 'Consolas', 'Courier New', monospace;
-        white-space: nowrap;
-      }
-
-      #page-current-address-label {
-        color: #ffeeb8;
-        opacity: 0.95;
-      }
-
-      #page-current-address-value {
-        color: #ffd54f;
-        font-weight: 700;
-      }
-
-      #page-address-hint {
-        display: inline-flex;
-        align-items: center;
-        padding: 3px 8px;
-        border-radius: 4px;
-        border: 1px solid rgba(159, 215, 203, 0.42);
-        background: rgba(159, 215, 203, 0.14);
-        color: #9fd7cb;
-        font-size: 11px;
-        font-family: 'Consolas', 'Courier New', monospace;
-        white-space: nowrap;
-      }
-
-      #page-address-input {
-        width: 230px;
-        padding: 5px 8px;
-        font-size: 11px;
-        font-family: 'Consolas', 'Courier New', monospace;
-        background: rgba(8, 18, 24, 0.92);
-        color: #d9f1ff;
-        border: 1px solid #2f5d74;
-        border-radius: 4px;
-        outline: none;
-      }
-
-      #page-address-input:focus {
-        border-color: #5ab2e2;
-        box-shadow: 0 0 0 2px rgba(90, 178, 226, 0.2);
-      }
-
-      #btn-page-query {
-        padding: 5px 10px;
-        font-size: 11px;
-        background: rgba(38, 127, 64, 0.28);
-        color: #a5e8b2;
-        border: 1px solid rgba(66, 157, 91, 0.55);
-        border-radius: 4px;
-        cursor: pointer;
-        letter-spacing: 0.03em;
-      }
-
-      #btn-page-query:hover {
-        background: rgba(38, 127, 64, 0.5);
-        color: #f1fff4;
-      }
-
-      #btn-page-prev,
-      #btn-page-next {
-        padding: 5px 10px;
-        font-size: 11px;
-        background: rgba(105, 84, 21, 0.32);
-        color: #ffe49a;
-        border: 1px solid rgba(167, 132, 30, 0.58);
-        border-radius: 4px;
-        cursor: pointer;
-        letter-spacing: 0.03em;
-      }
-
-      #btn-page-prev:hover,
-      #btn-page-next:hover {
-        background: rgba(136, 108, 25, 0.5);
-        color: #fff3cc;
-      }
-
-      #btn-page-theme-toggle {
-        padding: 5px 8px;
-        font-size: 11px;
-        font-family: 'Consolas', 'Courier New', monospace;
-        background: rgba(16, 28, 36, 0.92);
-        color: #d4ebff;
-        border: 1px solid rgba(79, 123, 150, 0.75);
-        border-radius: 4px;
-        outline: none;
-        cursor: pointer;
-        min-width: 102px;
-      }
-
-      #btn-page-theme-toggle:hover {
-        background: rgba(28, 45, 56, 0.96);
-      }
-
-      #btn-page-theme-toggle:focus {
-        border-color: #6fb8e8;
-        box-shadow: 0 0 0 2px rgba(111, 184, 232, 0.22);
-      }
-
-      #page-svg-frame {
-        flex: 1;
-        min-height: 0;
-        overflow: auto;
-        padding: 16px;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-      }
-
-      #page-svg-frame svg {
-        max-width: 100%;
-        height: auto;
-        display: block;
-      }
-
-      #page-svg-placeholder {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        color: #4a6a7a;
-        font-size: 13px;
-        text-align: center;
-        min-height: 200px;
-        width: 100%;
-      }
-
-      #page-svg-placeholder-icon {
-        font-size: 32px;
-        opacity: 0.4;
-      }
-
-      #page-svg-loading {
-        display: none;
-        align-items: center;
-        gap: 8px;
-        color: #7fc0f0;
-        font-size: 12px;
-      }
-
-      #page-svg-loading.visible {
-        display: flex;
-      }
 
       .command-layout {
         display: grid;
@@ -5099,7 +4910,6 @@
         <button class="workspace-tab" data-tab-target="command" role="tab" aria-selected="false">Command</button>
         <button class="workspace-tab" data-tab-target="function" role="tab" aria-selected="false">Function Calls</button>
         <button class="workspace-tab" data-tab-target="page" role="tab" aria-selected="false">Page Memory</button>
-        <button class="workspace-tab" data-tab-target="pagesvg" role="tab" aria-selected="false">Page SVG</button>
         <button class="workspace-tab" data-tab-target="memorylayout" role="tab" aria-selected="false">Memory Layout</button>
         <button class="workspace-tab" data-tab-target="pe" role="tab" aria-selected="false">PE</button>
         <button class="workspace-tab" data-tab-target="strings" role="tab" aria-selected="false">Strings</button>
@@ -5300,33 +5110,6 @@
             </div>
             <div id="function-call-detail-body" class="function-call-detail-body"></div>
           </section>
-        </div>
-      </div>
-
-      <div id="page-workspace">
-        <div id="page-workspace-toolbar">
-          <span id="page-workspace-title">Page Memory — SVG View</span>
-          <span id="page-workspace-meta">No data loaded</span>
-          <span id="page-address-hint">Hint: continuous 0x30 bytes means unavailable memory.</span>
-          <div id="page-svg-loading"><div class="spinner"></div> Loading <span id="page-svg-loading-target">0x0</span>…</div>
-          <button id="btn-page-theme-toggle" type="button" title="Toggle SVG theme" data-theme="light">Theme: Light</button>
-          <form id="page-address-form" autocomplete="off">
-            <input id="page-address-input" type="text" spellcheck="false" placeholder="Address (e.g. 0x7ff6abc12000)">
-            <button id="btn-page-query" type="submit" title="Load SVG at specified address">Query Address</button>
-            <button id="btn-page-prev" type="button" title="Previous page (PageUp)">◀ Prev Page</button>
-            <span id="page-current-address" title="Current requested memory address">
-              <span id="page-current-address-label">Current:</span>
-              <span id="page-current-address-value">(none)</span>
-            </span>
-            <button id="btn-page-next" type="button" title="Next page (PageDown)">Next Page ▶</button>
-          </form>
-          <button id="btn-page-reload" title="Reload SVG for current time and thread">↻ Reload</button>
-        </div>
-        <div id="page-svg-frame">
-          <div id="page-svg-placeholder">
-            <div id="page-svg-placeholder-icon">⬡</div>
-            <div>Switch to the <strong>Page Memory</strong> tab or click <strong>↗ SVG</strong> in the Stack Page panel to load the visualization.</div>
-          </div>
         </div>
       </div>
 

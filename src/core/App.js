@@ -242,12 +242,8 @@ export default class App {
     }
 
     _openMemoryLayoutPageSvg(address) {
-      const pageAddressInput = document.getElementById('page-address-input');
-      const normalizedAddress = this.toDisplayAddress(address);
-      if (pageAddressInput) {
-        pageAddressInput.value = normalizedAddress;
-      }
       this.setActiveTab('page');
+      this._navigatePageSvg(this.toDisplayAddress(address));
     }
 
     _openModuleInPe(address) {
@@ -603,52 +599,6 @@ export default class App {
     const svgBtn = document.getElementById('btn-page-svg');
     if (svgBtn) svgBtn.addEventListener('click', () => this.setActiveTab('page'));
 
-    const reloadBtn = document.getElementById('btn-page-reload');
-    if (reloadBtn) reloadBtn.addEventListener('click', () => this.loadPageSvgIntoTab());
-
-    const pageThemeToggle = document.getElementById('btn-page-theme-toggle');
-    if (pageThemeToggle) {
-      this.updatePageThemeToggle(pageThemeToggle, this.getPageSvgTheme());
-      pageThemeToggle.addEventListener('click', () => {
-        const nextTheme = this.getPageSvgTheme() === 'dark' ? 'light' : 'dark';
-        pageThemeToggle.dataset.theme = nextTheme;
-        this.updatePageThemeToggle(pageThemeToggle, nextTheme);
-        if (this.state.activeTab === 'page') {
-          this.loadPageSvgIntoTab();
-        }
-      });
-    }
-
-    const pageAddressForm = document.getElementById('page-address-form');
-    if (pageAddressForm) {
-      pageAddressForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        this.loadPageSvgIntoTab();
-      });
-    }
-
-    const prevPageBtn = document.getElementById('btn-page-prev');
-    if (prevPageBtn) {
-      prevPageBtn.addEventListener('click', () => this.stepPageAddress(-1));
-    }
-
-    const nextPageBtn = document.getElementById('btn-page-next');
-    if (nextPageBtn) {
-      nextPageBtn.addEventListener('click', () => this.stepPageAddress(1));
-    }
-
-    window.addEventListener('keydown', (event) => {
-      if (this.state.activeTab !== 'page') return;
-      if (this.isTypingTarget(event.target)) return;
-      if (event.key === 'PageUp') {
-        event.preventDefault();
-        this.stepPageAddress(-1);
-      } else if (event.key === 'PageDown') {
-        event.preventDefault();
-        this.stepPageAddress(1);
-      }
-    });
-
     // Update controls with initial state
     this.updateControls();
   }
@@ -676,7 +626,7 @@ export default class App {
   }
 
   setActiveTab(tabName) {
-    const validTabs = ['timeline', 'command', 'function', 'page', 'pagesvg', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
+    const validTabs = ['timeline', 'command', 'function', 'page', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
     const nextTab = validTabs.includes(tabName) ? tabName : 'timeline';
     this.state.activeTab = nextTab;
 
@@ -709,12 +659,9 @@ export default class App {
     this.flamegraphView?.setActive(nextTab === 'flamegraph');
     this.queueView?.setActive(nextTab === 'queue');
     this.positionView?.setActive(nextTab === 'position');
-    this.pageSvgView?.setActive(nextTab === 'pagesvg');
+    this.pageSvgView?.setActive(nextTab === 'page');
 
     if (nextTab === 'page') {
-      this.loadPageSvgIntoTab();
-    }
-    if (nextTab === 'pagesvg') {
       this._loadPageSvgView();
     }
     if (nextTab === 'memorylayout') {
@@ -878,80 +825,6 @@ export default class App {
     }
   }
 
-  async loadPageSvgIntoTab() {
-    const frame    = document.getElementById('page-svg-frame');
-    const meta     = document.getElementById('page-workspace-meta');
-    const loading  = document.getElementById('page-svg-loading');
-    const loadingTarget = document.getElementById('page-svg-loading-target');
-    const addressInput = document.getElementById('page-address-input');
-    const currentAddressEl = document.getElementById('page-current-address-value');
-    if (!frame) return;
-
-    if (!this.state.traceInfo?.available) {
-      frame.innerHTML = '<div id="page-svg-placeholder"><div id="page-svg-placeholder-icon">⬡</div><div>Not connected to a trace session.</div></div>';
-      if (meta) meta.textContent = 'No trace session';
-      if (currentAddressEl) currentAddressEl.textContent = '(none)';
-      return;
-    }
-
-    const requestedAddress = this.resolvePageRequestAddress(addressInput?.value ?? '');
-    const displayAddress = this.toDisplayAddress(requestedAddress);
-    const darkFlag = this.getPageSvgTheme() === 'dark' ? '&dark=1' : '&dark=0';
-    if (currentAddressEl) {
-      currentAddressEl.textContent = displayAddress;
-    }
-    if (loadingTarget) {
-      loadingTarget.textContent = displayAddress;
-    }
-
-    if (loading) loading.classList.add('visible');
-    if (meta) {
-      meta.textContent = `Loading ${displayAddress}…`;
-    }
-
-    try {
-      const position = this.getCurrentTracePosition();
-      const dark = this.getPageSvgTheme() === 'dark';
-      const svgText = await this.apiClient.getPageSvg({
-        major: position?.major,
-        minor: position?.minor,
-        threadId: this.state.activeThreadId,
-        address: requestedAddress || undefined,
-        dark,
-      });
-
-      frame.innerHTML = svgText;
-
-      const svgEl = frame.querySelector('svg');
-      if (svgEl) {
-        svgEl.style.maxWidth = '100%';
-        svgEl.style.height = 'auto';
-        svgEl.removeAttribute('width');
-        svgEl.removeAttribute('height');
-      }
-
-      const t = Math.floor(this.state.currentTime);
-      const tid = this.state.activeThreadId != null ? ` · TID ${this.state.activeThreadId}` : '';
-      if (meta) {
-        if (requestedAddress) {
-          meta.textContent = `Address ${displayAddress}${tid}`;
-        } else {
-          meta.textContent = `T=${t}${tid}`;
-        }
-      }
-    } catch (err) {
-      frame.innerHTML = `<div id="page-svg-placeholder"><div id="page-svg-placeholder-icon">✕</div><div>Failed to load SVG: ${this._escapeHtml(err.message)}</div></div>`;
-      if (meta) meta.textContent = 'Error';
-      this.notificationBar?.show(`Page SVG: ${err.message}`, 'error');
-    } finally {
-      if (loading) loading.classList.remove('visible');
-    }
-  }
-
-  _escapeHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
   async _loadPageSvgView() {
     if (!this.pageSvgView || !this.state.traceInfo?.available) return;
     try {
@@ -986,16 +859,7 @@ export default class App {
   }
 
   getPageSvgTheme() {
-    const themeToggle = document.getElementById('btn-page-theme-toggle');
-    return themeToggle?.dataset.theme === 'dark' ? 'dark' : 'light';
-  }
-
-  updatePageThemeToggle(button, theme) {
-    if (!button) return;
-    const normalizedTheme = theme === 'dark' ? 'dark' : 'light';
-    button.dataset.theme = normalizedTheme;
-    button.textContent = normalizedTheme === 'dark' ? 'Theme: Dark' : 'Theme: Light';
-    button.setAttribute('aria-label', `Switch page SVG theme, current theme ${normalizedTheme}`);
+    return this.pageSvgView?._theme ?? 'dark';
   }
 
   isTypingTarget(target) {
@@ -1017,28 +881,6 @@ export default class App {
   formatAddress(value) {
     if (typeof value !== 'bigint') return '';
     return `0x${value.toString(16)}`;
-  }
-
-  stepPageAddress(deltaPages) {
-    const addressInput = document.getElementById('page-address-input');
-    if (!addressInput) return;
-
-    const currentText = this.resolvePageRequestAddress(addressInput.value ?? '');
-    const current = this.parseAddress(currentText);
-    if (current == null) {
-      this.notificationBar?.show('Cannot step page: current address is invalid.', 'warning');
-      return;
-    }
-
-    const PAGE_SIZE = 0x1000n;
-    const next = current + (BigInt(deltaPages) * PAGE_SIZE);
-    if (next < 0n) {
-      this.notificationBar?.show('Cannot step page before address 0x0.', 'warning');
-      return;
-    }
-
-    addressInput.value = this.formatAddress(next);
-    this.loadPageSvgIntoTab();
   }
 
   resolvePageRequestAddress(rawInput) {
