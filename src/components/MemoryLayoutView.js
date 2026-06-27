@@ -66,6 +66,7 @@ export default class MemoryLayoutView {
     this._col3SelectedIndex = -1;
     this._pagesPerCell = 1;
     this._selectedPageAddress = null;
+    this._targetModuleBase = null;
     this._pageContent = null;
     this._pageLoading = false;
     this._pageError = '';
@@ -94,6 +95,22 @@ export default class MemoryLayoutView {
 
   setActive(active) {
     this._active = active;
+  }
+
+  focusModule(baseAddress) {
+    this._targetModuleBase = baseAddress;
+    if (this._col2Items.length > 0) {
+      const addr = typeof baseAddress === 'bigint' ? baseAddress : BigInt(baseAddress);
+      const idx = this._col2Items.findIndex(r => r.base === addr && r.type === 'module');
+      if (idx >= 0) {
+        this._col2Select(idx, { triggerSectionLoad: true });
+        requestAnimationFrame(() => {
+          const list = this._container.querySelector('.mly-modstack-list');
+          const sel = list?.querySelector('.selected');
+          if (sel) sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+      }
+    }
   }
 
   setLoading(loading) {
@@ -144,6 +161,21 @@ export default class MemoryLayoutView {
     }
 
     this._col2Select(this._col2SelectedIndex, { triggerSectionLoad: true });
+
+    if (this._targetModuleBase != null) {
+      const addr = typeof this._targetModuleBase === 'bigint' ? this._targetModuleBase : BigInt(this._targetModuleBase);
+      const idx = this._col2Items.findIndex(r => r.base === addr && r.type === 'module');
+      if (idx >= 0) {
+        this._col2SelectedIndex = idx;
+        this._col2Select(idx, { triggerSectionLoad: true });
+        requestAnimationFrame(() => {
+          const list = this._container.querySelector('.mly-modstack-list');
+          const sel = list?.querySelector('.selected');
+          if (sel) sel.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+      }
+      this._targetModuleBase = null;
+    }
   }
 
   _buildShell() {

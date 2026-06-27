@@ -767,13 +767,21 @@ export default class FlameGraphView {
       g.appendChild(rect);
 
       if (width > 30) {
+        const displayName = width > 60 ? node.name : (node.name.split('!').pop() || node.name);
+        const textPadding = 4;
+        const charWidth = 5.5;
+        const maxChars = Math.max(1, Math.floor((width - textPadding) / charWidth));
+        const truncated = displayName.length > maxChars
+          ? displayName.substring(0, maxChars - 1) + '\u2026'
+          : displayName;
+
         const text = this._svgNS('text');
         text.setAttribute('x', String(xOffset + 2));
         text.setAttribute('y', String(y + ROW_HEIGHT / 2 + 3));
         text.setAttribute('fill', '#fff');
         text.setAttribute('font-size', String(FONT_SIZE));
         text.setAttribute('font-family', 'Consolas, monospace');
-        text.textContent = width > 60 ? node.name : node.name.split('!').pop() || node.name;
+        text.textContent = truncated;
         g.appendChild(text);
       }
     }

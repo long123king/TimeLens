@@ -986,7 +986,11 @@ export default class FunctionCallBrowser {
     this.resultsList.innerHTML = this.results.map((event) => {
       const active = event.eventId === selectedEvent?.eventId;
       const checked = this.selectedEventIds.has(event.eventId);
-      const position = `${event.startPosition?.major ?? '?'}:${event.startPosition?.minor ?? 0}`;
+      const major = event.startPosition?.major;
+      const minor = event.startPosition?.minor ?? 0;
+      const position = major != null
+        ? `${BigInt(major).toString(16).toUpperCase()}:${Number(minor).toString(16).toUpperCase()}`
+        : '?';
       return `
         <div
           class="function-call-result${active ? ' active' : ''}"
@@ -1081,8 +1085,8 @@ export default class FunctionCallBrowser {
       <div class="function-call-detail-group">
         <div class="function-call-kv-row"><span class="function-call-kv-key">Module</span><span class="function-call-kv-value">${this.escapeHtml(selectedEvent.module || '—')}</span></div>
         <div class="function-call-kv-row"><span class="function-call-kv-key">Thread</span><span class="function-call-kv-value">${this.escapeHtml(String(selectedEvent.threadId ?? '—'))}</span></div>
-        <div class="function-call-kv-row"><span class="function-call-kv-key">Start</span><span class="function-call-kv-value">${this.escapeHtml(`${selectedEvent.startPosition?.major ?? '?'}:${selectedEvent.startPosition?.minor ?? 0}`)}</span></div>
-        <div class="function-call-kv-row"><span class="function-call-kv-key">End</span><span class="function-call-kv-value">${this.escapeHtml(`${selectedEvent.endPosition?.major ?? '?'}:${selectedEvent.endPosition?.minor ?? 0}`)}</span></div>
+        <div class="function-call-kv-row"><span class="function-call-kv-key">Start</span><span class="function-call-kv-value">${this.escapeHtml(this._fmtPos(selectedEvent.startPosition))}</span></div>
+        <div class="function-call-kv-row"><span class="function-call-kv-key">End</span><span class="function-call-kv-value">${this.escapeHtml(this._fmtPos(selectedEvent.endPosition))}</span></div>
         <div class="function-call-kv-row"><span class="function-call-kv-key">Function</span><span class="function-call-kv-value">${this.escapeHtml(selectedEvent.functionAddress ?? '—')}</span></div>
         <div class="function-call-kv-row"><span class="function-call-kv-key">Return</span><span class="function-call-kv-value">${this.escapeHtml(selectedEvent.returnAddress ?? '—')}</span></div>
         <div class="function-call-kv-row"><span class="function-call-kv-key">Value</span><span class="function-call-kv-value">${this.escapeHtml(selectedEvent.returnValue ?? '—')}</span></div>
@@ -1153,6 +1157,13 @@ export default class FunctionCallBrowser {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+  }
+
+  _fmtPos(pos) {
+    if (!pos?.major) return '—';
+    const major = BigInt(pos.major).toString(16).toUpperCase();
+    const minor = Number(pos.minor ?? 0);
+    return `${major}:${minor.toString(16).toUpperCase()}`;
   }
 
   onSearch = null;

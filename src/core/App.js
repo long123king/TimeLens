@@ -21,6 +21,7 @@ import FlameGraphView from '../components/FlameGraphView.js';
 import QueueView from '../components/QueueView.js';
 import PositionView from '../components/PositionView.js';
 import { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from '../utils/ZoomController.js';
+import { treemap, treemapSquarify, hierarchy } from 'd3-hierarchy';
 
 const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timelineHeight
 
@@ -151,9 +152,10 @@ export default class App {
         this.state.currentPosition = null;
         if (this.timeline) {
           this.timeline.setMajorRange(null, null, null, null);
-          this.timeline.setModules([]);
+          this.timeline.setThreadsTopOffset(0);
           this.timeline.setThreads([]);
         }
+        this._renderTimelineModules();
       }
     }
 
@@ -209,12 +211,161 @@ export default class App {
         const response = await this.apiClient.getModules();
         const modules = response.modules ?? [];
         this.state.modules = modules;
-        if (this.timeline) {
-          this.timeline.setModules(modules);
-        }
+        this._renderTimelineModules();
       } catch (err) {
         this.notificationBar.show(`Module data unavailable: ${err.message}`, 'warning');
       }
+    }
+
+    _renderTimelineModules() {
+      const modules = this.state.modules ?? [];
+      const barsEl = document.getElementById('hm-timeline-modules-bars');
+      const metaEl = document.getElementById('hm-timeline-modules-meta');
+      if (!barsEl) return;
+
+      const MODULE_COLORS = [
+        '#4ec9b0', '#dcdcaa', '#9cdcfe', '#ce9178', '#c586c0',
+        '#4fc1ff', '#b5cea8', '#f44747',
+      ];
+
+      if (!modules.length) {
+        barsEl.innerHTML = '<div style="color:#55778f;font-size:10px;padding:4px 8px">No modules loaded</div>';
+        if (metaEl) metaEl.textContent = '';
+        return;
+      }
+
+      if (metaEl) {
+        const main = modules.find(m => m.isMain);
+        const totalMB = modules.reduce((sum, m) => sum + (m.imageSize || 0), 0) / 1024 / 1024;
+        metaEl.textContent = `${modules.length} loaded · ${totalMB.toFixed(1)} MB` + (main ? ` · main: ${this._esc(main.name || main.path || '?')}` : '');
+      }
+
+      const sorted = [...modules].sort((a, b) => {
+        if (a.isMain) return 1;
+        if (b.isMain) return -1;
+        return (b.imageSize || 0) - (a.imageSize || 0);
+      });
+
+      const maxSize = Math.max(1, ...sorted.map(m => m.imageSize || 0));
+      const colorById = {};
+
+      barsEl.innerHTML = sorted.map((m, i) => {
+        const id = m.id ?? m.baseAddress ?? i;
+        const name = this._esc(m.name || m.path || '?');
+        const sizeText = m.imageSize ? `${(m.imageSize / 1024 / 1024).toFixed(1)} MB` : '';
+        return `<span class="hm-module-bar-wrap">
+          <button class="hm-module-bar">
+            <span class="hm-module-bar-label">${name}</span>
+            <span class="hm-module-bar-size">${sizeText || '?'}</span>
+          </button>
+        </span>`;
+      }).join('');
+
+      this._layoutMosaic(barsEl, sorted, maxSize);
+
+      barsEl.querySelectorAll('.hm-module-bar').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const addr = btn.dataset.modAddr;
+          if (addr) {
+            this._openModuleInMemoryLayout(addr);
+          } else {
+            this.setActiveTab('memorylayout');
+          }
+        });
+      });
+    }
+
+    _layoutMosaic(container, modules, maxSize) {
+      const rect = container.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        requestAnimationFrame(() => this._layoutMosaic(container, modules, maxSize));
+        return;
+      }
+
+      const MODULE_COLORS = [
+        '#4ec9b0', '#dcdcaa', '#9cdcfe', '#ce9178', '#c586c0',
+        '#4fc1ff', '#b5cea8', '#f44747',
+      ];
+
+      const colorById = {};
+      const data = {
+        children: modules.map((m, i) => {
+          const id = m.id ?? m.baseAddress ?? i;
+          if (!colorById[id]) colorById[id] = MODULE_COLORS[Object.keys(colorById).length % MODULE_COLORS.length];
+          const addr = m.baseAddress != null ? '0x' + BigInt(m.baseAddress).toString(16).toUpperCase() : '';
+          const sizeText = m.imageSize ? `${(m.imageSize / 1024 / 1024).toFixed(1)} MB` : '';
+          return {
+            name: m.name || m.path || '?',
+            value: m.imageSize || 1,
+            color: colorById[id],
+            isMain: !!m.isMain,
+            index: i,
+            addr,
+            sizeText,
+            path: m.path || '',
+          };
+        }),
+      };
+
+      const root = hierarchy(data).sum(d => d.value).sort((a, b) => b.value - a.value);
+      treemap()
+        .tile(treemapSquarify)
+        .size([rect.width, rect.height])
+        .padding(1)
+        (root);
+
+      root.leaves().forEach(leaf => {
+        const wrap = container.children[leaf.data.index];
+        if (!wrap) return;
+        wrap.style.left = leaf.x0 + 'px';
+        wrap.style.top = leaf.y0 + 'px';
+        wrap.style.width = (leaf.x1 - leaf.x0) + 'px';
+        wrap.style.height = (leaf.y1 - leaf.y0) + 'px';
+
+        const btn = wrap.querySelector('.hm-module-bar');
+        if (!btn) return;
+        btn.style.background = leaf.data.color;
+        btn.style.borderRadius = '0';
+        btn.style.width = '100%';
+        btn.style.height = '100%';
+        btn.style.border = '1px solid rgba(255,255,255,0.06)';
+        if (leaf.data.isMain) btn.classList.add('hm-module-bar-main');
+
+        btn.dataset.modName = leaf.data.name;
+        btn.dataset.modAddr = leaf.data.addr;
+        btn.dataset.modSize = leaf.data.sizeText;
+        btn.dataset.modPath = leaf.data.path;
+
+        btn.addEventListener('mouseenter', (e) => {
+          let tip = document.getElementById('hm-module-tooltip');
+          if (!tip) {
+            tip = document.createElement('div');
+            tip.id = 'hm-module-tooltip';
+            tip.className = 'hm-tooltip';
+            document.getElementById('app').appendChild(tip);
+          }
+          const d = btn.dataset;
+          const lines = [d.modName];
+          if (d.modAddr) lines.push(d.modAddr);
+          if (d.modSize) lines.push(d.modSize);
+          if (d.modPath) lines.push(d.modPath);
+          tip.innerHTML = lines.map(l => `<div class="hm-tooltip-row">${this._esc(l)}</div>`).join('');
+          tip.style.display = 'block';
+          const r = btn.getBoundingClientRect();
+          tip.style.left = r.left + 'px';
+          tip.style.top = (r.bottom + 4) + 'px';
+        });
+        btn.addEventListener('mouseleave', () => {
+          const tip = document.getElementById('hm-module-tooltip');
+          if (tip) tip.style.display = 'none';
+        });
+      });
+    }
+
+    _esc(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
     async _fetchMemoryLayout() {
@@ -251,6 +402,13 @@ export default class App {
       const normalizedAddress = this.toDisplayAddress(address);
       this.state.selectedPeImageBase = normalizedAddress;
       this.setActiveTab('pe');
+    }
+
+    _openModuleInMemoryLayout(addrHex) {
+      if (this.memoryLayoutView) {
+        this.memoryLayoutView.focusModule(addrHex);
+      }
+      this.setActiveTab('memorylayout');
     }
 
     _openMemAccessRange(startAddrHex, endAddrHex, mode = 'R') {
@@ -432,9 +590,6 @@ export default class App {
         this.state.timeBounds.first.minor,
         this.state.timeBounds.last.minor,
       );
-    }
-    if (this.state.modules.length > 0) {
-      this.timeline.setModules(this.state.modules);
     }
     if (this.state.threads.length > 0) {
       this.timeline.setThreads(this.state.threads);
@@ -628,8 +783,8 @@ export default class App {
   }
 
   setActiveTab(tabName) {
-    const validTabs = ['timeline', 'command', 'function', 'page', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
-    const nextTab = validTabs.includes(tabName) ? tabName : 'timeline';
+    const validTabs = ['home', 'timeline', 'command', 'function', 'page', 'memorylayout', 'environment', 'model', 'pe', 'strings', 'memaccess', 'flamegraph', 'queue', 'position'];
+    const nextTab = validTabs.includes(tabName) ? (tabName === 'home' ? 'timeline' : tabName) : 'timeline';
     this.state.activeTab = nextTab;
 
     // Cancel in-flight requests when switching away from flamegraph to avoid
@@ -665,6 +820,13 @@ export default class App {
 
     if (nextTab === 'page') {
       this._loadPageSvgView();
+    }
+    if (nextTab === 'timeline') {
+      if (this.timeline) {
+        const innerH = window.innerHeight;
+        const offset = Math.max(0, innerH * 0.5 - 18);
+        this.timeline.setThreadsTopOffset(offset);
+      }
     }
     if (nextTab === 'memorylayout') {
       this._fetchMemoryLayout();
@@ -1153,7 +1315,9 @@ export default class App {
       const pos = this.state.currentPosition;
       if (pos?.major != null) {
         const minor = Number.isFinite(Number(pos.minor)) ? Number(pos.minor) : 0;
-        positionEl.textContent = `${pos.major}:${minor}`;
+        const majHex = BigInt(pos.major).toString(16).toUpperCase();
+        const minHex = minor.toString(16).toUpperCase();
+        positionEl.textContent = `${majHex}:${minHex}`;
       } else {
         positionEl.textContent = '--:--';
       }

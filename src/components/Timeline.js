@@ -72,6 +72,7 @@ export default class Timeline {
     this._zoomLimitReached = false;
 
     this._threads = [];           // sorted by threadId ascending
+    this._threadsTopOffset = 0;   // px offset for thread lanes (room for module panel)
     this._threadExpanded = {};    // threadId -> boolean
     this._hoveredThreadId = null; // threadId currently being hovered
     this._activeThreadId = null;  // single selected thread id
@@ -129,10 +130,14 @@ export default class Timeline {
 
   get _moduleSectionTop() { return this._lanesTop; }
   get _moduleSectionBottom() {
+    if (this._modules.length === 0) return this._lanesTop + (this._threadsTopOffset || 0);
     const avail = Math.max(20, this._axisY - this._lanesTop - SECTION_GAP);
     return this._lanesTop + Math.floor(avail / 2);
   }
-  get _threadSectionTop() { return this._moduleSectionBottom + SECTION_GAP; }
+  get _threadSectionTop() {
+    if (this._modules.length === 0) return this._lanesTop + (this._threadsTopOffset || 0);
+    return this._moduleSectionBottom + SECTION_GAP;
+  }
   get _threadSectionBottom() { return this._axisY; }
 
   /** Height of a lane for the given module object. */
@@ -155,7 +160,11 @@ export default class Timeline {
 
   _threadLaneHeight(thread) {
     void thread;
-    return LANE_H_FULL;
+    if (this._threads.length === 0) return LANE_H_FULL;
+    const avail = this._axisY - this._threadSectionTop;
+    const gaps = (this._threads.length - 1) * LANE_GAP;
+    const h = Math.floor((avail - gaps) / this._threads.length);
+    return Math.max(6, Math.min(h, LANE_H_FULL));
   }
 
   _threadLaneY(index) {
@@ -301,6 +310,12 @@ export default class Timeline {
     }
     this._renderLanes();
     this._bringOverlaysToFront();
+  }
+
+  setThreadsTopOffset(px) {
+    if (this._threadsTopOffset === px) return;
+    this._threadsTopOffset = px;
+    this._renderLanes();
   }
 
   setActiveThreadId(threadId, { notify = false } = {}) {
@@ -1292,7 +1307,7 @@ export default class Timeline {
     const absPos = startAbs + offset;
     const major  = absPos / MINOR_PER_MAJOR;
     const minor  = Number(absPos % MINOR_PER_MAJOR);
-    return `${this.formatMajorLabel(major)}:${minor}`;
+    return `${this.formatMajorLabel(major)}:${minor.toString(16).toUpperCase()}`;
   }
 
   _toggleHoveredModulePin() {
@@ -1564,8 +1579,8 @@ export default class Timeline {
   renderMajorBoundaries(startMajor, endMajor, axisY, plotWidth) {
     const hTick = 0xff4d4d;
     const hText = 0xff6b6b;
-    const startLabel = `${this.formatMajorLabel(startMajor)}:${this.getBoundaryMinor('start')}`;
-    const endLabel   = `${this.formatMajorLabel(endMajor)}:${this.getBoundaryMinor('end')}`;
+    const startLabel = `${this.formatMajorLabel(startMajor)}:${this.getBoundaryMinor('start').toString(16).toUpperCase()}`;
+    const endLabel   = `${this.formatMajorLabel(endMajor)}:${this.getBoundaryMinor('end').toString(16).toUpperCase()}`;
     this.drawTickAndLabel(this.getPlotX(),              axisY, startLabel, hTick, hText);
     this.drawTickAndLabel(this.getPlotX() + plotWidth,  axisY, endLabel,   hTick, hText);
   }
@@ -2053,9 +2068,8 @@ export default class Timeline {
   }
 
   formatMajorLabel(value) {
-    return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return BigInt(value).toString(16).toUpperCase();
   }
-
   updateScrubberLabel(x) {
     if (!this.scrubberLabel) return;
     this.scrubberLabel.visible = true;
@@ -2075,7 +2089,7 @@ export default class Timeline {
     const startMinor = this.majorRange.startMinor ?? 0;
     const endMinor   = this.majorRange.endMinor   ?? 0;
     const minor = Math.max(0, Math.round(startMinor + (endMinor - startMinor) * normalized));
-    return `${this.formatMajorLabel(major)}:${minor}`;
+    return `${this.formatMajorLabel(major)}:${minor.toString(16).toUpperCase()}`;
   }
 
   getNormalizedCurrentTime() {

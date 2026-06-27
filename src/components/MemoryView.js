@@ -2,6 +2,7 @@ import { Container, Graphics, Text } from 'pixi.js';
 import MemoryRenderer from '../renderers/MemoryRenderer.js';
 import HexRenderer from '../renderers/HexRenderer.js';
 import PointerRenderer from '../renderers/PointerRenderer.js';
+import { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from '../utils/ZoomController.js';
 
 /**
  * MemoryView - Main memory visualization component
@@ -20,7 +21,7 @@ export default class MemoryView {
     this.regions = [];
 
     // Zoom level (0-4: Process, Region, Page, Byte, Bit)
-    this.zoomLevel = 0;
+    this.zoomLevel = MIN_ZOOM_LEVEL;
     this.focusAddress = 0;
 
     // Renderers for different visualizations

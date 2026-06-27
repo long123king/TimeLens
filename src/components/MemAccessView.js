@@ -22,12 +22,18 @@ export default class MemAccessView {
     this._buildShell();
   }
 
-  setActive(active) { this._active = active; }
+  setActive(active) {
+    this._active = active;
+    if (active && !this._probeGuard) this._autoProbe();
+  }
 
   acceptPrefill(startAddr, endAddr, mode = 'R') {
     if (this._startInput) this._startInput.value = startAddr || '';
     if (this._endInput) this._endInput.value = endAddr || '';
     if (this._modeSelect) this._modeSelect.value = mode;
+    if (this._active && startAddr && endAddr && !this._probeGuard) {
+      setTimeout(() => this._autoProbe(), 0);
+    }
   }
 
   setTraceInfo(traceInfo) {
@@ -70,16 +76,16 @@ export default class MemAccessView {
       '      <div class="ma-section-meta">Set the time range as a percentage of the trace, then click Query.</div>',
       '    </div>',
       '    <form id="ma-query-form" class="ma-query-form">',
-      '      <button id="ma-prev-page" class="ma-btn small secondary ma-nav-btn" type="button" title="Prev 32B" disabled>◀</button>',
+      '      <button id="ma-prev-page" class="ma-btn small secondary ma-nav-btn" type="button" title="Prev 4B" disabled>◀</button>',
       '      <div class="ma-field">',
       '        <label for="ma-start-addr">Start Address</label>',
       '        <input id="ma-start-addr" type="text" spellcheck="false" autocomplete="off" placeholder="0x7ff758f65000">',
       '      </div>',
       '      <div class="ma-field">',
       '        <label for="ma-end-addr">End Address</label>',
-      '        <input id="ma-end-addr" type="text" spellcheck="false" autocomplete="off" placeholder="0x7ff758f65020">',
+      '        <input id="ma-end-addr" type="text" spellcheck="false" autocomplete="off" placeholder="0x7ff758f65004">',
       '      </div>',
-      '      <button id="ma-next-page" class="ma-btn small secondary ma-nav-btn" type="button" title="Next 32B" disabled>▶</button>',
+      '      <button id="ma-next-page" class="ma-btn small secondary ma-nav-btn" type="button" title="Next 4B" disabled>▶</button>',
       '      <div class="ma-field">',
       '        <label for="ma-mode">Mode</label>',
       '        <select id="ma-mode">',
@@ -89,29 +95,19 @@ export default class MemAccessView {
       '          <option value="E">E (Execute)</option>',
       '        </select>',
       '      </div>',
+      '      <div class="ma-field ma-time-pct-field">',
+      '        <label for="ma-time-start-pct">Start %</label>',
+      '        <input id="ma-time-start-pct" type="number" min="0" max="100" step="0.1" value="0">',
+      '      </div>',
+      '      <span class="ma-time-sep">–</span>',
+      '      <div class="ma-field ma-time-pct-field">',
+      '        <label for="ma-time-end-pct">End %</label>',
+      '        <input id="ma-time-end-pct" type="number" min="0" max="100" step="0.1" value="5">',
+      '      </div>',
       '      <button class="ma-btn primary" id="ma-query-submit" type="submit">Query</button>',
       '    </form>',
-      // Time range — percent boxes only
-      '    <div class="ma-time-range">',
-      '      <div class="ma-time-range-label">',
-      '        <span>Time Range</span>',
-      '      </div>',
-      '      <div class="ma-time-inputs">',
-      '        <div class="ma-field ma-time-pct-field">',
-      '          <label for="ma-time-start-pct">Start %</label>',
-      '          <input id="ma-time-start-pct" type="number" min="0" max="100" step="0.1" value="0">',
-      '        </div>',
-      '        <span class="ma-time-sep">–</span>',
-      '        <div class="ma-field ma-time-pct-field">',
-      '          <label for="ma-time-end-pct">End %</label>',
-      '          <input id="ma-time-end-pct" type="number" min="0" max="100" step="0.1" value="5">',
-      '        </div>',
-      '      </div>',
-      '    </div>',
-      '    <div class="ma-query-chips">',
-      '      <button type="button" class="ma-chip" data-start="0x7ff758f65000" data-end="0x7ff758f65020" data-mode="R">taskmgr .data reads (32B)</button>',
-      '      <button type="button" class="ma-chip" data-start="0x7ff758f65000" data-end="0x7ff758f65020" data-mode="W">taskmgr .data writes (32B)</button>',
-      '    </div>',
+      '    <span id="ma-probe-status" class="ma-probe-status" style="display:none"></span>',
+      '    <div id="ma-probe-chips" class="ma-probe-chips"></div>',
       '  </section>',
       '  <section class="ma-results-panel">',
       '    <div class="ma-section-head">',
@@ -131,7 +127,7 @@ export default class MemAccessView {
       '    </div>',
       '    <div class="ma-table-wrap">',
       '      <table class="ma-table">',
-      '        <thead><tr><th>#</th><th>Type</th><th>Address</th><th>Size</th><th>Value</th><th>Old Value</th><th>Position</th><th>IP</th><th>IP Symbol</th><th>TID</th></tr></thead>',
+      '        <thead><tr><th>#</th><th>Type</th><th>Address</th><th>Size</th><th>Value</th><th>Old Value</th><th>Position</th><th>Pct%</th><th>IP</th><th>IP Symbol</th><th>TID</th></tr></thead>',
       '        <tbody id="ma-results-body"></tbody>',
       '      </table>',
       '    </div>',
@@ -159,17 +155,11 @@ export default class MemAccessView {
     this._traceLabel = this._container.querySelector('#ma-trace-label');
     this._timeStartPctInput = this._container.querySelector('#ma-time-start-pct');
     this._timeEndPctInput = this._container.querySelector('#ma-time-end-pct');
+    this._probeStatusEl = this._container.querySelector('#ma-probe-status');
+    this._probeChips = this._container.querySelector('#ma-probe-chips');
 
     // Events
     this._form?.addEventListener('submit', (e) => { e.preventDefault(); this._submitSearch(); });
-    this._container.querySelectorAll('.ma-query-chips .ma-chip').forEach((b) => {
-      b.addEventListener('click', () => {
-        this._startInput.value = b.dataset.start || '';
-        this._endInput.value = b.dataset.end || '';
-        if (b.dataset.mode) this._modeSelect.value = b.dataset.mode;
-        this._submitSearch();
-      });
-    });
     this._prevPageBtn?.addEventListener('click', () => this._stepPage(-1));
     this._nextPageBtn?.addEventListener('click', () => this._stepPage(1));
     this._timeStartPctInput?.addEventListener('change', () => {
@@ -247,12 +237,98 @@ export default class MemAccessView {
     const startText = String(this._startInput?.value ?? '').trim();
     if (!startText) return;
     let start; try { start = BigInt(startText); } catch { return; }
-    const PAGE = 0x20n;
+    const PAGE = 0x4n;
     const newStart = start + BigInt(direction) * PAGE;
     if (newStart < 0n) return;
     this._startInput.value = `0x${newStart.toString(16)}`;
     this._endInput.value = `0x${(newStart + PAGE).toString(16)}`;
     this._submitSearch();
+  }
+
+  async _autoProbe() {
+    if (!this.onSearch || this._probeGuard) return;
+    const startAddr = String(this._startInput?.value ?? '').trim();
+    const endAddr = String(this._endInput?.value ?? '').trim();
+    const mode = String(this._modeSelect?.value ?? 'R');
+    if (!startAddr || !endAddr) return;
+    try {
+      if (BigInt(endAddr) <= BigInt(startAddr)) return;
+    } catch { return; }
+
+    this._probeGuard = true;
+    const percentages = [0.1, 0.5, 1, 2, 5, 10, 20, 30, 50, 100];
+    if (this._probeChips) this._probeChips.innerHTML = '';
+    if (this._probeStatusEl) { this._probeStatusEl.style.display = 'inline'; this._probeStatusEl.textContent = 'Probing...'; }
+
+    let lastResultPct = null;
+    let lastResultData = null;
+
+    for (const pct of percentages) {
+      if (!this._active) break;
+      if (this._probeStatusEl) this._probeStatusEl.textContent = `Probing ${pct}%...`;
+      const result = await this._probeOne(pct, startAddr, endAddr, mode);
+      if (!result) break;
+
+      lastResultPct = pct;
+      lastResultData = result.data;
+
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'ma-chip ma-probe-chip';
+      chip.dataset.pct = String(pct);
+      chip.textContent = result.timedOut
+        ? `${pct}% (${result.ms}ms ⏱)`
+        : `${pct}% (${result.ms}ms · ${result.count})`;
+      chip.title = `${pct}% range: ${result.ms}ms, ${result.count} events${result.timedOut ? ' (timed out)' : ''}`;
+      chip.addEventListener('click', () => {
+        if (this._timeStartPctInput) this._timeStartPctInput.value = '0';
+        if (this._timeEndPctInput) this._timeEndPctInput.value = String(pct);
+        this._timeStartPct = 0;
+        this._timeEndPct = pct;
+        this._submitSearch();
+      });
+      if (this._probeChips) this._probeChips.appendChild(chip);
+
+      if (result.ms > 2000) {
+        if (this._probeStatusEl) this._probeStatusEl.textContent = `Stopped at ${pct}% (${result.ms}ms > 2s).`;
+        break;
+      }
+    }
+
+    if (lastResultData != null) {
+      if (this._timeStartPctInput) this._timeStartPctInput.value = '0';
+      if (this._timeEndPctInput) this._timeEndPctInput.value = String(lastResultPct);
+      this._timeStartPct = 0;
+      this._timeEndPct = lastResultPct;
+      this.setData(lastResultData);
+    }
+
+    this._probeGuard = false;
+    if (this._probeChips && this._probeChips.children.length === 0) {
+      if (this._probeStatusEl) this._probeStatusEl.textContent = 'All probes failed.';
+    }
+  }
+
+  async _probeOne(pct, startAddr, endAddr, mode) {
+    const t0 = performance.now();
+    try {
+      const data = await this.onSearch({
+        startAddr, endAddr, mode,
+        timeStartPct: 0,
+        timeEndPct: pct,
+      });
+      const ms = Math.round(performance.now() - t0);
+      return {
+        ms,
+        count: (data?.collectedCount ?? data?.accesses?.length ?? 0).toLocaleString(),
+        timedOut: data?.timedOut ?? false,
+        data,
+      };
+    } catch {
+      const ms = Math.round(performance.now() - t0);
+      if (this._probeStatusEl) this._probeStatusEl.textContent = `Error at ${pct}%`;
+      return null;
+    }
   }
 
   // -------------------------------------------------------------------
@@ -307,6 +383,7 @@ export default class MemAccessView {
         + `<td class="ma-cell-val">${this._esc(a?.value ?? '—')}</td>`
         + `<td class="ma-cell-val ma-oldval">${this._esc(a?.overwrittenValue ?? '—')}</td>`
         + `<td class="ma-cell-pos">${pos}</td>`
+        + `<td class="ma-cell-pct">${this._formatPercentPosition(a)}</td>`
         + `<td class="ma-cell-addr">${this._esc(a?.ip ?? '—')}</td>`
         + `<td class="ma-cell-sym" title="${this._esc(a?.ipSymbol ?? '')}">${this._esc(a?.ipSymbol ?? '')}</td>`
         + `<td class="ma-cell-num">${a?.threadId ?? '—'}</td></tr>`;
@@ -324,6 +401,24 @@ export default class MemAccessView {
       const sm = (typeof start.major === 'bigint' ? start.major : BigInt(start.major ?? '0')).toString(16).toUpperCase();
       const sn = (typeof start.minor === 'bigint' ? start.minor : BigInt(start.minor ?? 0)).toString(16).toUpperCase();
       return `${sm}:${sn}`;
+    } catch {
+      return '\u2014';
+    }
+  }
+
+  _formatPercentPosition(a) {
+    const start = a?.startPos;
+    const first = this._traceInfo?.firstPos;
+    const last = this._traceInfo?.lastPos;
+    if (!start || !first?.major || !last?.major) return '\u2014';
+    try {
+      const posVal = BigInt(start.major ?? '0') * 1000000n + BigInt(start.minor ?? 0);
+      const firstVal = BigInt(first.major) * 1000000n + BigInt(first.minor ?? 0);
+      const lastVal = BigInt(last.major) * 1000000n + BigInt(last.minor ?? 0);
+      const span = lastVal - firstVal;
+      if (span <= 0n) return '\u2014';
+      const pct = Number((posVal - firstVal) * 10000n / span) / 100;
+      return pct.toFixed(2) + '%';
     } catch {
       return '\u2014';
     }
