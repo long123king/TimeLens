@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.vite/
+.DS_Store
+tmpclaude-*
+tmpclaude-*/
+未命名/
+demo.html
+WindowsTerminal.exe_page_*.svg
+*.dmp
+*.trace
+*.etl
+*.evtx
+*.md
+!README.md
