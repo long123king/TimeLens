@@ -155,6 +155,11 @@
       opacity: 1;
     }
 
+    .tab-icon-bright {
+      filter: brightness(0) invert(1);
+      display: inline-block;
+    }
+
     /* Control Panel */
     #control-panel {
       display: none;
@@ -655,10 +660,10 @@
       }
 
       .cp-header {
-        font-size: 10px;
+        font-size: 14px;
         color: #858585;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.03em;
         margin-bottom: 6px;
       }
 
@@ -1118,6 +1123,27 @@
       #app[data-active-tab="timeline"] #timeline-threads-frame {
         display: block;
       }
+      .hm-timeline-threads-head {
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        z-index: 3;
+        height: 28px;
+        display: flex; align-items: center; gap: 10px;
+        padding: 0 10px;
+        background: rgba(30, 30, 30, 0.95);
+        border-bottom: 1px solid #3c3c3c;
+        border-radius: 4px 4px 0 0;
+        pointer-events: none;
+      }
+      .hm-timeline-threads-title {
+        font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em;
+        color: #858585;
+      }
+      .hm-timeline-threads-meta {
+        font-size: 11px; color: #858585;
+        font-family: 'Consolas', 'Menlo', monospace;
+        margin-left: auto;
+      }
 
       #timeline-modules {
         display: none;
@@ -1127,7 +1153,7 @@
         right: calc(var(--right-dock-width) + 20px);
         bottom: calc(50% + 4px);
         z-index: 3;
-        padding: 8px 10px;
+        padding: 10px;
         border-radius: 4px;
         border: 1px solid #3c3c3c;
         background: rgba(30, 30, 30, 0.95);
@@ -1138,16 +1164,18 @@
         flex-direction: column;
       }
       .hm-timeline-modules-head {
-        display: flex; align-items: baseline; gap: 10px;
-        margin-bottom: 3px;
+        display: flex; align-items: center; gap: 10px;
+        margin-bottom: 8px;
         padding: 0 2px;
       }
       .hm-timeline-modules-title {
-        font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
-        font-weight: 700; color: #7dbde8;
+        font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em;
+        color: #858585;
       }
       .hm-timeline-modules-meta {
-        font-size: 9px; color: #65839b;
+        font-size: 11px; color: #858585;
+        font-family: 'Consolas', 'Menlo', monospace;
+        margin-left: auto;
       }
 
       #timeline-modules .hm-module-bars {
@@ -1159,41 +1187,147 @@
       .hm-module-bar-wrap {
         position: absolute; display: block;
         overflow: hidden;
+        animation: hm-tile-in 320ms ease both;
+      }
+      @keyframes hm-tile-in {
+        from { opacity: 0; transform: scale(0.96); }
+        to   { opacity: 1; transform: scale(1); }
       }
       .hm-module-bar {
         display: flex; flex-direction: column; align-items: center;
-        justify-content: center; gap: 2px;
+        justify-content: center; gap: 3px;
         cursor: pointer; border: none;
-        transition: filter 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+        color: #3a4452;
+        text-align: center;
+        border-radius: 6px;
+        container-type: inline-size;
+        container-name: tile;
+        font-family:
+          'Inter', -apple-system, BlinkMacSystemFont,
+          'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        font-feature-settings: 'ss01' 1, 'cv11' 1, 'tnum' 1;
+        font-variant-numeric: tabular-nums;
+        transition:
+          filter 160ms ease,
+          box-shadow 160ms ease,
+          transform 160ms ease;
         overflow: hidden;
       }
+      .hm-module-bar::after {
+        content: '';
+        position: absolute; inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(
+          160deg,
+          rgba(255,255,255,0.10) 0%,
+          rgba(255,255,255,0.02) 45%,
+          rgba(0,0,0,0.18) 100%
+        );
+        pointer-events: none;
+      }
       .hm-module-bar:hover {
-        filter: brightness(1.25);
-        box-shadow: inset 0 0 0 2px rgba(255,255,255,0.35);
+        filter: brightness(1.18) saturate(1.1);
+        box-shadow:
+          inset 0 0 0 2px rgba(255,255,255,0.55),
+          0 6px 18px rgba(0, 0, 0, 0.55);
+        transform: scale(1.015);
         z-index: 2;
       }
+      .hm-module-bar:active {
+        transform: scale(0.99);
+        filter: brightness(0.95);
+      }
       .hm-module-bar-label {
-        color: #fff; font-size: 10px; font-weight: 700;
+        position: relative; z-index: 1;
+        display: inline-flex;
+        align-items: baseline;
+        max-width: 96%;
+        font-size: var(--tile-fs-label, 10px);
+        font-weight: 700;
         white-space: nowrap;
-        text-shadow: 0 1px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6);
-        overflow: hidden; text-overflow: ellipsis; max-width: 90%;
-        background: rgba(0,0,0,0.3);
-        padding: 1px 6px; border-radius: 3px;
-        line-height: 1.3;
+        text-shadow: 0 1px 0 rgba(255,255,255,0.35);
+        overflow: hidden;
+        line-height: 1.25;
+        letter-spacing: 0.01em;
+      }
+      .hm-label-initial {
+        flex-shrink: 0;
+        font-weight: 800;
+        font-size: 1.1em;
+        margin-right: 2px;
+      }
+      .hm-label-rest {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        flex: 0 1 auto;
+      }
+      .hm-label-initial-svg {
+        display: none;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .hm-label-initial-svg text {
+        font-size: 65px;
+        font-weight: 800;
+        font-family:
+          'Inter', -apple-system, BlinkMacSystemFont,
+          'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+        fill: #3a4452;
+        text-rendering: geometricPrecision;
       }
       .hm-module-bar-size {
-        color: rgba(255,255,255,0.85); font-size: 8px;
-        font-family: 'Consolas', monospace; white-space: nowrap;
+        position: relative; z-index: 1;
+        font-size: var(--tile-fs-size, 8.5px);
+        font-family:
+          'JetBrains Mono', 'SF Mono', 'Consolas', 'Menlo', monospace;
+        white-space: nowrap;
         overflow: hidden; text-overflow: ellipsis; max-width: 90%;
-        text-shadow: 0 1px 3px rgba(0,0,0,0.7);
-        background: rgba(0,0,0,0.25);
-        padding: 0 5px; border-radius: 2px;
+        text-shadow: 0 1px 0 rgba(255,255,255,0.3);
+        letter-spacing: 0.01em;
+      }
+
+      /* Container queries: progressive disclosure based on tile width */
+      @container tile (max-width: 80px) {
+        .hm-module-bar-size { display: none; }
+      }
+      @container tile (max-width: 60px) {
+        .hm-module-bar::before { display: none; }
+        .hm-module-bar.hm-module-bar-main .hm-module-bar-label { margin-top: 0; }
+      }
+      @container tile (max-width: 48px) {
+        .hm-label-rest { display: none; }
+        .hm-label-initial { display: none; }
+        .hm-label-initial-svg { display: block; }
+      }
+      .hm-module-bar.hm-module-bar-main {
+        box-shadow:
+          inset 0 0 0 2px rgba(255, 255, 255, 0.95),
+          0 4px 14px rgba(0, 0, 0, 0.5);
+      }
+      .hm-module-bar.hm-module-bar-main::before {
+        content: '★ MAIN';
+        position: absolute; top: 4px; left: 6px;
+        z-index: 2;
+        font-size: 7.5px; font-weight: 700;
+        letter-spacing: 0.08em;
+        color: #ffffff;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        background: rgba(15, 20, 30, 0.92);
+        border: 1px solid rgba(255,255,255,0.6);
+        padding: 1px 5px; border-radius: 2px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.5);
       }
       .hm-module-bar.hm-module-bar-main .hm-module-bar-label {
-        font-size: 12px;
-      }
-      .hm-module-bar.hm-module-bar-main .hm-module-bar-size {
-        font-size: 10px;
+        margin-top: 10px;
       }
 
       /* module tooltip */
@@ -1202,19 +1336,35 @@
         position: fixed;
         z-index: 999;
         max-width: 480px;
-        padding: 8px 12px;
+        padding: 10px 14px;
         border-radius: 8px;
-        border: 1px solid rgba(100, 160, 210, 0.3);
-        background: rgba(14, 22, 34, 0.97);
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        border: 1px solid rgba(100, 160, 210, 0.35);
+        background:
+          linear-gradient(180deg, rgba(20, 32, 46, 0.98) 0%, rgba(12, 20, 30, 0.98) 100%);
+        box-shadow:
+          0 12px 32px rgba(0, 0, 0, 0.55),
+          inset 0 1px 0 rgba(140, 190, 230, 0.08);
         pointer-events: none;
       }
       .hm-tooltip-row {
-        color: #c0d8ef; font-size: 11px; font-family: 'Consolas', monospace;
+        color: #c0d8ef; font-size: 11px; font-family: 'Consolas', 'Menlo', monospace;
         padding: 2px 0; white-space: nowrap;
+        line-height: 1.5;
       }
       .hm-tooltip-row:first-child {
-        color: #edf6fd; font-weight: 700; font-size: 12px;
+        color: #edf6fd; font-weight: 700; font-size: 12.5px;
+        border-bottom: 1px solid rgba(110, 150, 185, 0.18);
+        padding-bottom: 4px; margin-bottom: 2px;
+      }
+
+      /* empty state */
+      .hm-module-bars-empty {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        color: #6a8aa3; font-size: 11px;
+        font-family: 'Consolas', 'Menlo', monospace;
+        letter-spacing: 0.04em;
+        opacity: 0.85;
       }
 
       #position-workspace {
@@ -1475,8 +1625,106 @@
       .pv-toolbar-subtitle {
         font-size: 10px; color: #4a6a5a;
       }
+      .pv-toolbar-controls {
+        display: flex; align-items: center; gap: 6px;
+        margin-left: auto;
+      }
+      .pv-control-label {
+        font-size: 10px; color: #6a8a7a;
+        text-transform: uppercase; letter-spacing: 0.05em;
+      }
+      .pv-control-input {
+        font-family: 'Consolas', monospace; font-size: 11px;
+        padding: 4px 6px;
+        background: rgba(10, 20, 14, 0.7);
+        border: 1px solid rgba(90, 145, 110, 0.3);
+        border-radius: 4px;
+        color: #c8e6c9;
+        outline: none;
+      }
+      .pv-control-input:focus {
+        border-color: rgba(122, 184, 144, 0.7);
+      }
+      #pv-pos-input { width: 120px; }
+      #pv-tid-select { min-width: 120px; }
+      .pv-control-btn {
+        font-family: inherit; font-size: 11px;
+        padding: 4px 12px;
+        background: linear-gradient(135deg, #2d7045, #3d9060);
+        border: 1px solid rgba(122, 184, 144, 0.6);
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        transition: filter 120ms ease;
+      }
+      .pv-control-btn:hover { filter: brightness(1.15); }
+      .pv-control-btn:active { filter: brightness(0.95); }
+      #pv-major-input { width: 80px; }
+      #pv-minor-input { width: 70px; }
+      #pv-tid-select { min-width: 140px; }
+
+      /* thread lifespan row (matches Home tab hm-tl-row style) */
+      .pv-lifespan {
+        position: absolute; top: 36px; left: 0; right: 0;
+        display: flex; align-items: center; gap: 10px;
+        padding: 5px 12px;
+        background: linear-gradient(180deg, rgba(14, 28, 18, 0.96), rgba(10, 20, 14, 0.96));
+        border-bottom: 1px solid rgba(100, 180, 120, 0.4);
+        z-index: 2;
+      }
+      .pv-lifespan-tid {
+        font-family: 'Consolas', monospace; font-size: 11px; font-weight: 700;
+        white-space: nowrap; flex-shrink: 0; min-width: 60px;
+      }
+      .pv-lifespan-track {
+        position: relative; flex: 1; height: 20px;
+        background: rgba(12, 22, 35, 0.5);
+        border: 1px solid rgba(90, 145, 110, 0.2);
+        border-radius: 4px;
+        overflow: visible;
+      }
+      .pv-lifespan-bar {
+        position: absolute; top: 1px; bottom: 1px;
+        border-radius: 3px;
+        opacity: 0.85;
+      }
+      .pv-lifespan-bound {
+        position: absolute; top: 22px;
+        font-family: 'Consolas', monospace; font-size: 8px;
+        color: #3a5a4a; user-select: none; white-space: nowrap;
+      }
+      .pv-lifespan-bound--l { left: 0; }
+      .pv-lifespan-bound--r { right: 0; }
+      .pv-lifespan-slider {
+        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+        appearance: none; -webkit-appearance: none;
+        background: transparent; margin: 0; cursor: pointer;
+      }
+      .pv-lifespan-slider:disabled { cursor: not-allowed; opacity: 0.35; }
+      .pv-lifespan-slider::-webkit-slider-runnable-track {
+        background: transparent; height: 100%;
+      }
+      .pv-lifespan-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 8px; height: 18px;
+        background: linear-gradient(180deg, #5ed4a0, #2d8a55);
+        border: 1px solid rgba(122, 184, 144, 0.7);
+        border-radius: 2px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      }
+      .pv-lifespan-slider::-moz-range-thumb {
+        width: 8px; height: 18px;
+        background: linear-gradient(180deg, #5ed4a0, #2d8a55);
+        border: 1px solid rgba(122, 184, 144, 0.7);
+        border-radius: 2px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+      }
+      .pv-lifespan-range {
+        font-family: 'Consolas', monospace; font-size: 10px;
+        color: #5a7a60; white-space: nowrap; flex-shrink: 0;
+      }
       .pv-body {
-        position: absolute; top: 36px; bottom: 0; left: 0; right: 0;
+        position: absolute; top: 66px; bottom: 0; left: 0; right: 0;
         overflow-y: auto; padding: 10px;
       }
       .pv-body > * + * { margin-top: 10px; }
@@ -1534,13 +1782,22 @@
       }
       .pv-reg-name { color: #4a6a5a; min-width: 28px; }
       .pv-reg-val  { color: #e0d060; }
+      .pv-reg-val-clickable {
+        cursor: pointer;
+        transition: color 120ms ease, background 120ms ease;
+        padding: 0 3px; border-radius: 2px;
+      }
+      .pv-reg-val-clickable:hover {
+        color: #5ed4a0;
+        background: rgba(90, 200, 140, 0.12);
+      }
 
       /* stack svg */
       .pv-stack-svg {
         background: rgba(10, 20, 14, 0.6);
         border: 1px solid rgba(90, 145, 110, 0.2);
         border-radius: 6px; padding: 4px;
-        height: 520px; min-height: 300px;
+        height: 760px; min-height: 400px;
         overflow: hidden;
       }
 
@@ -1575,11 +1832,12 @@
         backdrop-filter: blur(10px);
       }
       .hm-toolbar-title {
-        font-size: 12px; text-transform: uppercase; letter-spacing: 0.12em;
-        font-weight: 700; color: #8fd2ff;
+        font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em;
+        color: #858585;
       }
       .hm-toolbar-subtitle {
-        font-size: 11px; color: #7093ab; margin-top: 4px;
+        font-size: 11px; color: #858585; margin-top: 4px;
+        font-family: 'Consolas', 'Menlo', monospace;
       }
       .hm-toolbar-pill {
         padding: 8px 12px;
@@ -1635,15 +1893,16 @@
       }
       .hm-hero-main { min-width: 0; }
       .hm-hero-kicker {
-        font-size: 10px; text-transform: uppercase; letter-spacing: 0.16em;
-        color: #78b8e8; margin-bottom: 10px;
+        font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em;
+        color: #858585; margin-bottom: 10px;
       }
       .hm-hero-title {
         font-size: 24px; line-height: 1.2; font-weight: 700;
         color: #f3f8fd; margin-bottom: 10px;
       }
       .hm-hero-subtitle {
-        font-size: 12px; line-height: 1.6; color: #97b3cb; max-width: 760px;
+        font-size: 12px; line-height: 1.6; color: #858585; max-width: 760px;
+        font-family: 'Consolas', 'Menlo', monospace;
       }
       .hm-hero-chips {
         display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px;
@@ -1705,27 +1964,27 @@
       }
 
       .hm-card {
-        background: linear-gradient(180deg, rgba(12, 22, 35, 0.92), rgba(9, 17, 28, 0.84));
-        border: 1px solid rgba(100, 160, 210, 0.16);
-        border-radius: 16px; padding: 16px;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 26px rgba(0,0,0,0.18);
+        background: rgba(30, 30, 30, 0.95);
+        border: 1px solid #3c3c3c;
+        border-radius: 4px; padding: 10px;
       }
       .hm-card-emphasis {
-        background: linear-gradient(160deg, rgba(15, 36, 36, 0.98), rgba(10, 24, 28, 0.88));
+        background: rgba(30, 30, 30, 0.95);
       }
       .hm-card-accent {
-        background: linear-gradient(160deg, rgba(22, 30, 52, 0.98), rgba(10, 18, 32, 0.88));
+        background: rgba(30, 30, 30, 0.95);
       }
       .hm-card-head {
-        display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
-        margin-bottom: 12px;
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        margin-bottom: 8px;
       }
       .hm-card-title {
-        font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-        font-weight: 700; color: #7dbde8;
+        font-size: 14px; text-transform: uppercase; letter-spacing: 0.03em;
+        color: #858585;
       }
       .hm-card-meta {
-        font-size: 10px; color: #65839b;
+        font-size: 11px; color: #858585;
+        font-family: 'Consolas', 'Menlo', monospace;
       }
       .hm-card-big {
         font-size: 24px; font-weight: 700; line-height: 1.1;
@@ -1753,68 +2012,49 @@
       /* status strip */
       .hm-status-strip {
         display: flex; gap: 0; align-items: stretch;
-        border-radius: 14px;
-        border: 1px solid rgba(100, 160, 210, 0.14);
-        background: linear-gradient(180deg, rgba(12, 22, 35, 0.92), rgba(9, 17, 28, 0.84));
+        border-radius: 4px;
+        border: 1px solid #3c3c3c;
+        background: rgba(30, 30, 30, 0.95);
         overflow: hidden;
       }
       .hm-strip-item {
         flex: 1; display: flex; align-items: center; gap: 8px;
-        padding: 10px 16px; min-width: 0;
-        border-right: 1px solid rgba(100, 160, 210, 0.1);
+        padding: 8px 12px; min-width: 0;
+        border-right: 1px solid rgba(255,255,255,0.06);
       }
       .hm-strip-item:last-child { border-right: none; }
       .hm-strip-dot {
-        width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0;
+        width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
       }
       .hm-strip-label {
-        color: #6e92ae; font-size: 10px; text-transform: uppercase;
-        letter-spacing: 0.05em; flex-shrink: 0;
+        color: #858585; font-size: 11px; text-transform: uppercase;
+        letter-spacing: 0.03em; flex-shrink: 0;
       }
       .hm-strip-val {
-        color: #cbe2f5; font-size: 12px; font-family: 'Consolas', monospace;
+        color: #4ec9b0; font-size: 12px; font-family: 'Consolas', monospace;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       }
       .hm-strip-sub {
-        color: #6593af; font-size: 10px; font-family: 'Consolas', monospace;
+        color: #858585; font-size: 10px; font-family: 'Consolas', monospace;
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 4px;
       }
-      .hm-strip-accent {
-        background: rgba(42, 70, 105, 0.28);
-      }
-
-      /* module bars */
-      .hm-module-bars {
-        display: flex; gap: 4px; align-items: stretch;
-        flex-wrap: wrap;
-      }
-      .hm-module-bar {
-        display: flex; align-items: center; gap: 6px;
-        min-width: 44px; height: 28px; padding: 0 10px;
-        border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);
-        cursor: pointer;
-        transition: transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
-        overflow: hidden;
-      }
-      .hm-module-bar:hover {
-        transform: translateY(-1px);
-        filter: brightness(1.2);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        z-index: 2;
-      }
-      .hm-module-bar-label {
-        color: #fff; font-size: 10px; font-weight: 700;
-        white-space: nowrap; text-shadow: 0 1px 2px rgba(0,0,0,0.5);
-        overflow: hidden; text-overflow: ellipsis; max-width: 180px;
-      }
-      .hm-module-bar-size {
-        color: rgba(255,255,255,0.6); font-size: 9px;
-        font-family: 'Consolas', monospace; white-space: nowrap; flex-shrink: 0;
-      }
-      .hm-module-bar-main {
-        order: 999; flex-grow: 1; min-width: 120px;
-        border-color: rgba(255,255,255,0.18);
-      }
+    .hm-strip-accent {
+      background: rgba(42, 70, 105, 0.28);
+    }
+    .hm-strip-item-clickable {
+      cursor: pointer;
+      transition: background 140ms ease;
+    }
+    .hm-strip-item-clickable:hover {
+      background: rgba(78, 157, 255, 0.12);
+    }
+    .info-row-clickable {
+      cursor: pointer;
+      transition: color 140ms ease;
+    }
+    .info-row-clickable:hover {
+      color: #4ec9b0;
+    }
 
       /* thread lanes (Timeline-inspired) */
       .hm-thread-lanes {
@@ -5746,17 +5986,17 @@
     <!-- UI Overlay -->
     <div id="ui-overlay">
       <div id="workspace-tabs" role="tablist" aria-label="Workspace tabs">
-        <button class="workspace-tab active" data-tab-target="timeline" role="tab" aria-selected="true">Home</button>
-        <button class="workspace-tab" data-tab-target="command" role="tab" aria-selected="false">Command</button>
-        <button class="workspace-tab" data-tab-target="function" role="tab" aria-selected="false">Function Calls</button>
-        <button class="workspace-tab" data-tab-target="page" role="tab" aria-selected="false">Page Memory</button>
-        <button class="workspace-tab" data-tab-target="memorylayout" role="tab" aria-selected="false">Memory Layout</button>
-        <button class="workspace-tab" data-tab-target="pe" role="tab" aria-selected="false">PE</button>
-        <button class="workspace-tab" data-tab-target="strings" role="tab" aria-selected="false">Strings</button>
-        <button class="workspace-tab" data-tab-target="memaccess" role="tab" aria-selected="false">Mem Access</button>
-        <button class="workspace-tab" data-tab-target="flamegraph" role="tab" aria-selected="false">Flame Graph</button>
-        <button class="workspace-tab" data-tab-target="queue" role="tab" aria-selected="false">⚡ Queue</button>
+        <button class="workspace-tab active" data-tab-target="timeline" role="tab" aria-selected="true">🏠 Home</button>
+        <button class="workspace-tab" data-tab-target="memorylayout" role="tab" aria-selected="false">📚 Memory Layout</button>
+        <button class="workspace-tab" data-tab-target="page" role="tab" aria-selected="false">📄 Page Memory</button>
+        <button class="workspace-tab" data-tab-target="flamegraph" role="tab" aria-selected="false">🔥 Flame Graph</button>
+        <button class="workspace-tab" data-tab-target="memaccess" role="tab" aria-selected="false"><span class="tab-icon-bright">👣</span> Mem Access</button>
         <button class="workspace-tab" data-tab-target="position" role="tab" aria-selected="false">📍 Position</button>
+        <button class="workspace-tab" data-tab-target="command" role="tab" aria-selected="false">⌨️ Command</button>
+        <button class="workspace-tab" data-tab-target="function" role="tab" aria-selected="false">ƒ Function Calls</button>
+        <button class="workspace-tab" data-tab-target="pe" role="tab" aria-selected="false">⚙️ PE Header</button>
+        <button class="workspace-tab" data-tab-target="strings" role="tab" aria-selected="false">🔤 Strings</button>
+        <button class="workspace-tab" data-tab-target="queue" role="tab" aria-selected="false">⚡ Queue</button>
       </div>
 
       <!-- Control Panel -->
@@ -5851,7 +6091,7 @@
             <div class="reg-row"><span class="label">R15</span><span class="value" id="reg-r15">--</span></div>
           </div>
           <div class="panel-title" style="margin-top: 10px;">Cursor</div>
-          <div class="info-row"><span class="label">Position</span><span class="value" id="info-position">0:0</span></div>
+          <div class="info-row"><span class="label">Position</span><span class="value info-row-clickable" id="info-position" data-nav="position" title="Open Position tab">0:0</span></div>
           <div class="info-row"><span class="label">Thread</span><span class="value" id="info-thread">--</span></div>
           <div class="info-row"><span class="label">PC</span><span class="value" id="info-pc">--</span></div>
           <div class="info-row"><span class="label">Stack Pointer</span><span class="value" id="info-sp">--</span></div>
@@ -5879,7 +6119,12 @@
         <div id="hm-timeline-modules-bars" class="hm-module-bars"></div>
       </div>
 
-      <div id="timeline-threads-frame"></div>
+      <div id="timeline-threads-frame">
+        <div class="hm-timeline-threads-head">
+          <span class="hm-timeline-threads-title">Threads</span>
+          <span id="hm-timeline-threads-meta" class="hm-timeline-threads-meta"></span>
+        </div>
+      </div>
 
       <div id="command-workspace">
         <div class="command-layout">

@@ -95,6 +95,27 @@ export default class App {
       this.connectionPanel.onStopRequested = () => this._requestServerStop();
       this.connectionPanel.setDisconnected();
 
+      document.querySelectorAll('[data-nav]').forEach(el => {
+        if (el.closest('#workspace-tabs')) return;
+        el.addEventListener('click', (e) => {
+          const target = el.getAttribute('data-nav');
+          if (!target) return;
+          if (target === 'position' && el.id === 'info-position') {
+            const pos = this.state.currentPosition;
+            const tid = this.state.activeThreadId;
+            if (pos?.major != null) {
+              this._openPosition(pos.major, Number(pos.minor ?? 0), tid);
+            } else {
+              this.setActiveTab('position');
+            }
+          } else if (target === 'position') {
+            this.setActiveTab('position');
+          } else {
+            this.setActiveTab(target);
+          }
+        });
+      });
+
       this.connectionMonitor.onStateChange = (connected, serverData) =>
         this._handleConnectionChange(connected, serverData);
       this.connectionMonitor.onStatusUpdate = (statusResponse) =>
@@ -156,6 +177,7 @@ export default class App {
           this.timeline.setThreads([]);
         }
         this._renderTimelineModules();
+        this._renderTimelineThreadsMeta();
       }
     }
 
@@ -189,6 +211,7 @@ export default class App {
               trace.lastPos.minor,
             );
           }
+          this.positionView?.setTraceBounds(this.state.timeBounds);
         }
       } catch (err) {
         // Server is up but trace-info failed — show partial status
@@ -229,7 +252,7 @@ export default class App {
       ];
 
       if (!modules.length) {
-        barsEl.innerHTML = '<div style="color:#55778f;font-size:10px;padding:4px 8px">No modules loaded</div>';
+        barsEl.innerHTML = '<div class="hm-module-bars-empty">No modules loaded</div>';
         if (metaEl) metaEl.textContent = '';
         return;
       }
@@ -251,12 +274,20 @@ export default class App {
 
       barsEl.innerHTML = sorted.map((m, i) => {
         const id = m.id ?? m.baseAddress ?? i;
-        const name = this._esc(m.name || m.path || '?');
+        const rawName = m.name || m.path || '?';
+        const safeName = this._esc(rawName).trim();
+        const initial = safeName.charAt(0).toUpperCase() || '?';
+        const rest = safeName.slice(1);
         const sizeText = m.imageSize ? `${(m.imageSize / 1024 / 1024).toFixed(1)} MB` : '';
         return `<span class="hm-module-bar-wrap">
           <button class="hm-module-bar">
-            <span class="hm-module-bar-label">${name}</span>
+            <span class="hm-module-bar-label">
+              <span class="hm-label-initial">${initial}</span><span class="hm-label-rest">${rest}</span>
+            </span>
             <span class="hm-module-bar-size">${sizeText || '?'}</span>
+            <svg class="hm-label-initial-svg" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+              <text x="50" y="50" text-anchor="middle" dominant-baseline="central">${initial}</text>
+            </svg>
           </button>
         </span>`;
       }).join('');
@@ -317,18 +348,28 @@ export default class App {
       root.leaves().forEach(leaf => {
         const wrap = container.children[leaf.data.index];
         if (!wrap) return;
+        const w = leaf.x1 - leaf.x0;
+        const h = leaf.y1 - leaf.y0;
         wrap.style.left = leaf.x0 + 'px';
         wrap.style.top = leaf.y0 + 'px';
-        wrap.style.width = (leaf.x1 - leaf.x0) + 'px';
-        wrap.style.height = (leaf.y1 - leaf.y0) + 'px';
+        wrap.style.width = w + 'px';
+        wrap.style.height = h + 'px';
+        const sizeMetric = Math.sqrt(w * h);
+        const labelFs = Math.max(8, Math.min(18, Math.floor(sizeMetric / 3.5)));
+        const sizeFs = Math.max(6, Math.min(13, Math.floor(sizeMetric / 5)));
+        const initialFs = Math.max(14, Math.min(26, Math.floor(sizeMetric / 2.5)));
+        wrap.style.setProperty('--tile-fs-label', labelFs + 'px');
+        wrap.style.setProperty('--tile-fs-size', sizeFs + 'px');
+        wrap.style.setProperty('--tile-fs-initial', initialFs + 'px');
 
         const btn = wrap.querySelector('.hm-module-bar');
         if (!btn) return;
         btn.style.background = leaf.data.color;
-        btn.style.borderRadius = '0';
         btn.style.width = '100%';
         btn.style.height = '100%';
-        btn.style.border = '1px solid rgba(255,255,255,0.06)';
+        if (!leaf.data.isMain) {
+          btn.style.border = '1px solid rgba(255,255,255,0.08)';
+        }
         if (leaf.data.isMain) btn.classList.add('hm-module-bar-main');
 
         btn.dataset.modName = leaf.data.name;
@@ -447,9 +488,28 @@ export default class App {
             this.timeline.setActiveThreadId(this.state.activeThreadId);
           }
         }
+        this.positionView?.setThreads(threads);
+        this._renderTimelineThreadsMeta();
       } catch (err) {
         this.notificationBar.show(`Thread data unavailable: ${err.message}`, 'warning');
       }
+    }
+
+    _renderTimelineThreadsMeta() {
+      const metaEl = document.getElementById('hm-timeline-threads-meta');
+      if (!metaEl) return;
+      const threads = this.state.threads ?? [];
+      if (!threads.length) {
+        metaEl.textContent = '';
+        return;
+      }
+      const active = threads.find(t => t.threadId === this.state.activeThreadId) ?? threads[0];
+      const sym = active?.procSymbol?.name ? this._esc(active.procSymbol.name).split('!').pop() : null;
+      const tid = active?.threadId != null ? `TID ${active.threadId}` : null;
+      const parts = [`${threads.length} thread${threads.length === 1 ? '' : 's'}`];
+      if (tid) parts.push(tid);
+      if (sym) parts.push(sym);
+      metaEl.textContent = parts.join(' · ');
     }
 
     async _fetchThreadLifetimes() {
@@ -473,6 +533,7 @@ export default class App {
       } catch {
         this._threadLifetimes = new Map();
       }
+      this.positionView?.setThreadLifetimes(this._threadLifetimes);
     }
 
     async _fetchEnvironment() {
@@ -602,6 +663,7 @@ export default class App {
     }
     this.timeline.onThreadSelect = (threadId) => {
       this.state.activeThreadId = threadId;
+      this._renderTimelineThreadsMeta();
       this.handleTimeCommit(this.state.currentTime);
     };
     this.timeline.onTimeChange = (time) => this.handleTimePreview(time);
@@ -707,7 +769,8 @@ export default class App {
       this.flamegraphView = new FlameGraphView(flamegraphContainer);
       this.flamegraphView.onGetTraceBounds = () => this.state.timeBounds;
       this.flamegraphView.onGetThreads = () => this.state.threads;
-      this.flamegraphView.onGetThreadLifetimes = () => this._threadLifetimes;
+          this.flamegraphView.onGetThreadLifetimes = () => this._threadLifetimes;
+          this.positionView?.setThreadLifetimes(this._threadLifetimes);
       this.flamegraphView.onGetActiveThreadId = () => this.state.activeThreadId;
       this.flamegraphView.onFetchCallstacks = async ({ positions, threadId }) =>
         this._fetchCallstacksAtPositions(positions, threadId);
@@ -742,6 +805,9 @@ export default class App {
           threadId, address: String(address),
         });
       };
+      this.positionView.setThreads(this.state.threads);
+      this.positionView.setTraceBounds(this.state.timeBounds);
+      this.positionView.setThreadLifetimes(this._threadLifetimes);
       this.positionView.setDisconnected();
     }
 
@@ -824,7 +890,7 @@ export default class App {
     if (nextTab === 'timeline') {
       if (this.timeline) {
         const innerH = window.innerHeight;
-        const offset = Math.max(0, innerH * 0.5 - 18);
+        const offset = Math.max(0, innerH * 0.5 - 18 + 32);
         this.timeline.setThreadsTopOffset(offset);
       }
     }
@@ -1248,6 +1314,7 @@ export default class App {
 
     if (Number.isFinite(threadId) && this.timeline?.setActiveThreadId(threadId)) {
       this.state.activeThreadId = threadId;
+      this._renderTimelineThreadsMeta();
     }
 
     if (normalizedTime != null) {
