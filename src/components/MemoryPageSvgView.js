@@ -37,6 +37,7 @@ export default class MemoryPageSvgView {
     this._data = data; this._bytes = null; this._categories = null;
     this._callItems = null;
     this._callByteSet = null;
+    this._disasmItems = null;
     this._selectedOffset = this._hoveredOffset = -1;
     if (data?.available) {
       const h = data.bytes ?? '';
@@ -51,6 +52,8 @@ export default class MemoryPageSvgView {
         const len = entry.instrLen || 5;
         for (let j = 0; j < len; j++) this._callByteSet.add(entry.offset + j);
       }
+
+      this._disasmItems = data.disasm ?? [];
 
       this._pageModule = this._resolvePageModule();
     }
@@ -268,6 +271,55 @@ export default class MemoryPageSvgView {
     }
     this._svgEl.appendChild(gB);
 
+    // ---- 4.5 Disassembly text (integrated into hex grid rows) ----
+    if ((this._disasmItems ?? []).length > 0) {
+      const gDisasm = mk('g');
+      const dColX = gridRight + 12;
+      const offMap = new Map();
+      for (const d of (this._disasmItems ?? [])) offMap.set(d.offset, d);
+
+      for (let r = 0; r < ROWS; r++) {
+        const base = r * 8;
+        const matching = [];
+        for (let off = base; off < base + 8; off++) {
+          const d = offMap.get(off);
+          if (d) matching.push(d);
+          else {
+            // also check if an instruction starts before this row and spans into it
+          }
+        }
+        if (matching.length === 0) continue;
+
+        const y = OY + r * GH + GH / 2 + 5;
+        const textEl = mk('text', { x: dColX, y, fill: '#c0d0b0', 'font-family': 'monospace', 'font-size': '11' });
+
+        for (let i = 0; i < matching.length; i++) {
+          const d = matching[i];
+          const parsed = this._parseInstr(d.text);
+          if (!parsed.opcode) continue;
+
+          if (i > 0) textEl.appendChild(mk('tspan', { fill: '#3a5a4a' }, ' \u2502 '));
+
+          const opColor = this._opcodeColor(parsed.opcode);
+          textEl.appendChild(mk('tspan', { fill: opColor, 'font-weight': '600' }, this._esc(parsed.opcode)));
+
+          for (const op of parsed.operands) {
+            const info = this._classifyOperand(op);
+            const opndColor = this._operandColor(info.type);
+            const clickable = (info.type === 'addr' || info.type === 'sym') ? ' mp-disasm-click' : '';
+            const tspan = mk('tspan', { fill: opndColor, class: clickable });
+            if (info.type === 'addr') tspan.setAttribute('data-nav-addr', info.addr);
+            tspan.textContent = ` ${this._esc(info.text)}`;
+            textEl.appendChild(tspan);
+          }
+        }
+
+        gDisasm.appendChild(textEl);
+      }
+
+      this._svgEl.appendChild(gDisasm);
+    }
+
     // ---- 5. Annotations ----
     const gArrows = mk('g'); const gAnnot = mk('g'); const gStr = mk('g');
     gArrows.setAttribute('stroke', arrowC); gArrows.setAttribute('stroke-width', '3'); gArrows.setAttribute('stroke-opacity', arrowO);
@@ -438,6 +490,66 @@ export default class MemoryPageSvgView {
     // Toolbar
     this._addrInputEl.value = this._data.pageAddr;
     this._pageInfoEl.textContent = `RSP: ${this._data.rsp || '(none)'}`;
+  }
+
+  // ---- Disassembly / Instruction Visualization ----
+
+  _parseInstr(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return { opcode: '', operands: [] };
+
+    // Split opcode from operands — opcode is first whitespace-delimited token
+    const spaceIdx = trimmed.search(/\s/);
+    const opcode = spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed;
+    const rest = spaceIdx >= 0 ? trimmed.slice(spaceIdx).trim() : '';
+
+    // Split operands, respecting brackets and parentheses
+    const operands = this._splitOperands(rest);
+    return { opcode, operands };
+  }
+
+  _splitOperands(str) {
+    if (!str) return [];
+    const parts = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < str.length; i++) {
+      const c = str[i];
+      if (c === '(' || c === '[' || c === '<') depth++;
+      else if (c === ')' || c === ']' || c === '>') depth--;
+      else if (c === ',' && depth === 0) {
+        parts.push(str.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(str.slice(start).trim());
+    return parts.filter(p => p.length > 0);
+  }
+
+  _classifyOperand(op) {
+    const addrMatch = op.match(/0x[0-9a-fA-F`]+/);
+    if (addrMatch) return { type: 'addr', text: op, addr: addrMatch[0] };
+    if (/[a-z]+![a-z_]/i.test(op)) return { type: 'sym', text: op };
+    return { type: 'other', text: op };
+  }
+
+  _opcodeColor(opcode) {
+    const op = opcode.toLowerCase();
+    if (op === 'call') return '#ff4444';
+    if (op === 'ret' || op === 'retn') return '#c586c0';
+    if (/^j(mp|[a-z])/.test(op)) return '#ffa94d';
+    if (op === 'push') return '#569cd6';
+    if (op === 'pop') return '#569cd6';
+    if (op === 'cmp' || op === 'test') return '#dcdcaa';
+    if (op === 'int' || op === 'syscall') return '#f44747';
+    if (op === 'nop') return '#6a9955';
+    return '#9cdcfe';
+  }
+
+  _operandColor(type) {
+    if (type === 'addr') return '#ce9178';
+    if (type === 'sym') return '#c586c0';
+    return '#8ac8b8';
   }
 
   _arrowhead(NS, id, color, opacity) {
