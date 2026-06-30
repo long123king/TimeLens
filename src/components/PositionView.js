@@ -24,11 +24,32 @@ export default class PositionView {
     this.onFetchRegisters = null;    // async ({ major, minor, threadId }) => registers{}
     this.onFetchPageRender  = null;  // async ({ major, minor, threadId, address }) => pageRenderData
 
+    // Forwarded to embedded MemoryPageSvgView
+    Object.defineProperty(this, 'onCheckExecutable', {
+      get() { return this._embeddedPageView?.onCheckExecutable; },
+      set(v) { if (this._embeddedPageView) this._embeddedPageView.onCheckExecutable = v; }
+    });
+
     this._buildShell();
   }
 
   setActive(active) {
     this._embeddedPageView?.setActive(active);
+    if (active && this._tidSelectEl?.value) {
+      if (!this._position) {
+        // No position loaded yet — auto-load from current slider position
+        this._autoLoadAtSliderPosition();
+      } else if (!this._embeddedPageView?._data?.available) {
+        // Position exists but the stack page never loaded (RSP missing,
+        // previous fetch failed, or embedded view was reset). Re-fetch so
+        // the page memory section appears automatically on first tab entry.
+        this.load(this._position.major, this._position.minor, this._position.threadId);
+      }
+      // Ensure content is visible (may have been hidden by placeholder)
+      if (this._contentEl && this._contentEl.style.display === 'none' && this._position) {
+        this._contentEl.style.display = 'block';
+      }
+    }
   }
   setDisconnected() {
     this._renderPlaceholder('◎', 'Not connected to a debug session.');
@@ -58,9 +79,17 @@ export default class PositionView {
     // Defer stack memory fetch (needs RSP from registers)
     if (registers?.rsp) {
       if (this._stackTitleEl) this._stackTitleEl.textContent = 'Stack Memory (RSP)';
-      const pageData = await this._fetchPageRender(registers.rsp);
-      this._embeddedPageView.setData(pageData);
-      this._stackMetaEl.textContent = pageData?.available ? 'RSP page' : 'unavailable';
+      const result = await this._fetchPageRender(registers.rsp);
+      const pageData = result?.data;
+      const isCode = result?.isCode ?? false;
+      this._embeddedPageView.setData(pageData, isCode);
+      if (pageData?.available) {
+        const kind = isCode ? 'Code' : 'Data';
+        const perm = result?.sectionPermission || pageData?.sectionPermission || 'none';
+        this._stackMetaEl.textContent = `RSP page · ${kind} · PE perm ${perm}`;
+      } else {
+        this._stackMetaEl.textContent = 'unavailable';
+      }
     }
   }
 
@@ -86,8 +115,9 @@ export default class PositionView {
     const tidStr = this._tidSelectEl?.value;
     if (!tidStr) return;
     const major = Number(this._sliderEl.value);
-    const minor = Number(this._position?.minor ?? 0);
     const threadId = Number(tidStr);
+    // Always start at minor 0 — first possible position for the selected thread
+    const minor = (this._position?.threadId === threadId) ? Number(this._position.minor ?? 0) : 0;
     this._position = { major, minor, threadId };
     this.load(major, minor, threadId);
   }
@@ -285,6 +315,7 @@ export default class PositionView {
     this._tidSelectEl.addEventListener('change', () => this._onThreadChange());
     this._sliderEl.addEventListener('change', () => this._onSliderInput());
     this._registersEl.addEventListener('click', (e) => this._onRegisterClick(e));
+    this._callstackEl.addEventListener('click', (e) => this._onCallstackClick(e));
   }
 
   setThreads(threads) {
@@ -379,7 +410,7 @@ export default class PositionView {
         : '';
       return `<div class="pv-frame">
         <span class="pv-frame-num">#${num}</span>
-        <span class="pv-frame-addr">${addr}</span>
+        <span class="pv-frame-addr pv-clickable" data-addr="${addr}">${addr}</span>
         <span class="pv-frame-sym">${sym}</span>
         ${disp ? `<span class="pv-frame-disp">${disp}</span>` : ''}
       </div>`;
@@ -419,9 +450,12 @@ export default class PositionView {
     const regUpper = reg.toUpperCase();
     this._stackTitleEl.textContent = `Stack Memory (${regUpper})`;
     this._stackMetaEl.textContent = 'loading...';
-    this._navigateEmbeddedPage(addr).then((pageData) => {
+    this._navigateEmbeddedPage(addr).then((result) => {
+      const pageData = result?.data;
+      const kind = result?.isCode ? 'Code' : 'Data';
+      const perm = result?.sectionPermission || pageData?.sectionPermission || 'none';
       this._stackMetaEl.textContent = pageData?.available
-        ? `${regUpper} page`
+        ? `${regUpper} page · ${kind} · PE perm ${perm}`
         : 'unavailable';
       if (pageData?.available) {
         const mpInfoEl = this._container.querySelector('#mp-page-info');
@@ -430,13 +464,36 @@ export default class PositionView {
     });
   }
 
+  _onCallstackClick(e) {
+    const addrEl = e.target.closest('.pv-frame-addr');
+    if (!addrEl) return;
+    const raw = addrEl.textContent.trim();
+    if (!raw || raw === '?') return;
+    const addr = '0x' + raw;
+    if (!/^0x[0-9A-F]+$/.test(addr)) return;
+
+    const funcName = addrEl.parentElement?.querySelector('.pv-frame-sym')?.textContent || 'function';
+    this._stackTitleEl.textContent = `Stack Memory (${funcName})`;
+    this._stackMetaEl.textContent = 'loading...';
+    this._navigateEmbeddedPage(addr).then((result) => {
+      const pageData = result?.data;
+      if (pageData?.available) {
+        const kind = result?.isCode ? 'Code' : 'Data';
+        const perm = result?.sectionPermission || pageData?.sectionPermission || 'none';
+        this._stackMetaEl.textContent = `page · ${kind} · PE perm ${perm}`;
+      } else {
+        this._stackMetaEl.textContent = pageData?.error || 'unavailable';
+      }
+    });
+  }
+
   // --- Stack memory ---
 
   async _navigateEmbeddedPage(address) {
-    if (!this._position) return { available: false };
-    const pageData = await this._fetchPageRender(address);
-    this._embeddedPageView.setData(pageData);
-    return pageData;
+    if (!this._position) return { data: { available: false }, isCode: false, sectionPermission: 'none' };
+    const result = await this._fetchPageRender(address);
+    this._embeddedPageView.setData(result.data, result.isCode);
+    return result;
   }
 
   // --- Fetch helpers ---
@@ -464,10 +521,11 @@ export default class PositionView {
   async _fetchPageRender(address) {
     try {
       const { major, minor, threadId } = this._position;
-      return await this.onFetchPageRender?.({ major, minor, threadId, address });
+      const result = await this.onFetchPageRender?.({ major, minor, threadId, address });
+      return result ?? { data: { available: false }, isCode: false, sectionPermission: 'none' };
     } catch (e) {
       console.error('[PV] page render fetch failed:', e);
-      return { available: false };
+      return { data: { available: false, error: e.message }, isCode: false, sectionPermission: 'none' };
     }
   }
 

@@ -20,7 +20,9 @@ import MemAccessView from '../components/MemAccessView.js';
 import FlameGraphView from '../components/FlameGraphView.js';
 import QueueView from '../components/QueueView.js';
 import PositionView from '../components/PositionView.js';
+import HomeView from '../components/HomeView.js';
 import { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from '../utils/ZoomController.js';
+import { getPeSectionPermission, getPeSectionSpan, parsePeBigInt } from '../utils/PeSectionUtils.js';
 import { treemap, treemapSquarify, hierarchy } from 'd3-hierarchy';
 
 const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timelineHeight
@@ -76,7 +78,9 @@ export default class App {
     this.flamegraphView = null;
     this.queueView = null;
     this.positionView = null;
+    this.homeView = null;
     this._threadLifetimes = new Map(); // threadId → { start, end }
+    this._sectionPermissions = [];     // [{start: BigInt, end: BigInt, perm: string}] from PE sections
     this.latestRegisters = null;
 
     // Components
@@ -160,6 +164,7 @@ export default class App {
         this.flamegraphView?.setDisconnected();
         this.queueView?.setDisconnected();
         this.positionView?.setDisconnected();
+        this.homeView?.setDisconnected();
         if (this.state.traceInfo !== null) {
           this.notificationBar.show('dk server disconnected', 'warning');
         }
@@ -196,6 +201,7 @@ export default class App {
         this.connectionPanel.setConnected(serverData?.server, trace);
         // Pass trace info to mem-access view for time range display
         this.memaccessView?.setTraceInfo(trace);
+        this.homeView?.setTraceInfo(trace);
 
         if (trace?.available && trace?.firstPos && trace?.lastPos) {
           this.state.timeBounds = { first: trace.firstPos, last: trace.lastPos };
@@ -212,6 +218,7 @@ export default class App {
             );
           }
           this.positionView?.setTraceBounds(this.state.timeBounds);
+          this.homeView?.setTraceBounds(this.state.timeBounds);
         }
       } catch (err) {
         // Server is up but trace-info failed — show partial status
@@ -219,14 +226,25 @@ export default class App {
         this.notificationBar.show(`Trace info unavailable: ${err.message}`, 'error');
       }
 
-      // Phase 2: fetch module lanes regardless of trace-info outcome
-      this._fetchModules();
+      // Phase 2: ensure modules loaded before threads trigger position loads
+      await this._fetchModules();
       this._fetchThreads();
       this._fetchThreadLifetimes();
       this._fetchMemoryLayout();
       this._fetchEnvironment();
       this._refreshModelHome();
       this._fetchPe();
+
+      // Enable all tabs now that core data is loaded
+      this._enableAllTabs();
+    }
+
+    _enableAllTabs() {
+      if (this._tabsReady) return;
+      this._tabsReady = true;
+      document.querySelectorAll('[data-tab-target]').forEach((button) => {
+        button.disabled = false;
+      });
     }
 
     async _fetchModules() {
@@ -235,9 +253,62 @@ export default class App {
         const modules = response.modules ?? [];
         this.state.modules = modules;
         this._renderTimelineModules();
+        // Build section-permission cache for page classification. This must
+        // finish before we enable tabs — otherwise a user clicking into
+        // Position/Page before the cache is ready will get a false "data
+        // page" classification for every address.
+        await this._buildSectionPermissionCache(modules);
       } catch (err) {
         this.notificationBar.show(`Module data unavailable: ${err.message}`, 'warning');
       }
+    }
+
+    async _buildSectionPermissionCache(modules) {
+      const sections = [];
+      const failures = [];
+      for (const m of (modules ?? [])) {
+        const base = parsePeBigInt(m.baseAddress) ?? 0n;
+        if (base === 0n) continue;
+        try {
+          const peData = await this.apiClient.getPe('0x' + base.toString(16));
+          for (const s of (peData?.sections ?? [])) {
+            const span = getPeSectionSpan(s, base);
+            if (!span) continue;
+            sections.push({
+              start: span.start,
+              end: span.endExclusive,
+              perm: getPeSectionPermission(s.characteristics),
+            });
+          }
+        } catch (err) {
+          failures.push({ module: m?.name ?? '?', base: m?.baseAddress, err: err?.message ?? String(err) });
+        }
+      }
+      if (failures.length && typeof console !== 'undefined') {
+        console.warn(`[App] PE fetch failed for ${failures.length} module(s); ` +
+          `page classification will miss them. First failure:`, failures[0]);
+      }
+      this._sectionPermissions = sections;
+    }
+
+    getSectionPermissionForAddress(addr) {
+      const big = parsePeBigInt(addr);
+      if (big == null) return '';
+      for (const s of (this._sectionPermissions ?? [])) {
+        if (big >= s.start && big < s.end) return s.perm || '';
+      }
+      return '';
+    }
+
+    isCodeAddress(addr) {
+      return this.getSectionPermissionForAddress(addr).includes('x');
+    }
+
+    _attachSectionPermission(pageData, address) {
+      if (!pageData || typeof pageData !== 'object') return pageData;
+      const sectionPerm = this.getSectionPermissionForAddress(address);
+      pageData.sectionPermission = sectionPerm || 'none';
+      return pageData;
     }
 
     _renderTimelineModules() {
@@ -489,6 +560,7 @@ export default class App {
           }
         }
         this.positionView?.setThreads(threads);
+        this.homeView?.setThreads(threads, this.state.activeThreadId);
         this._renderTimelineThreadsMeta();
       } catch (err) {
         this.notificationBar.show(`Thread data unavailable: ${err.message}`, 'warning');
@@ -534,6 +606,7 @@ export default class App {
         this._threadLifetimes = new Map();
       }
       this.positionView?.setThreadLifetimes(this._threadLifetimes);
+      this.homeView?.setThreadLifetimes(this._threadLifetimes);
     }
 
     async _fetchEnvironment() {
@@ -771,6 +844,7 @@ export default class App {
       this.flamegraphView.onGetThreads = () => this.state.threads;
           this.flamegraphView.onGetThreadLifetimes = () => this._threadLifetimes;
           this.positionView?.setThreadLifetimes(this._threadLifetimes);
+      this.homeView?.setThreadLifetimes(this._threadLifetimes);
       this.flamegraphView.onGetActiveThreadId = () => this.state.activeThreadId;
       this.flamegraphView.onFetchCallstacks = async ({ positions, threadId }) =>
         this._fetchCallstacksAtPositions(positions, threadId);
@@ -800,10 +874,17 @@ export default class App {
         return data?.registers ?? {};
       };
       this.positionView.onFetchPageRender = async ({ major, minor, threadId, address }) => {
-        return await this.apiClient.getPageRender({
+        const sectionPermission = this.getSectionPermissionForAddress(address);
+        const isCode = sectionPermission.includes('x');
+        const fn = isCode ? this.apiClient.getPageRenderCode : this.apiClient.getPageRenderData;
+        const data = this._attachSectionPermission(await fn.call(this.apiClient, {
           major: String(major), minor: Number(minor),
           threadId, address: String(address),
-        });
+        }), address);
+        return { data, isCode, sectionPermission: sectionPermission || 'none' };
+      };
+      this.positionView.onCheckExecutable = (pageAddr) => {
+        return this.isCodeAddress(pageAddr);
       };
       this.positionView.setThreads(this.state.threads);
       this.positionView.setTraceBounds(this.state.timeBounds);
@@ -811,11 +892,21 @@ export default class App {
       this.positionView.setDisconnected();
     }
 
+    const homeContainer = document.getElementById('home-workspace');
+    if (homeContainer) {
+      this.homeView = new HomeView(homeContainer);
+      this.homeView.onNavigate = (tab) => this.setActiveTab(tab);
+      this.homeView.setDisconnected();
+    }
+
     const pageSvgContainer = document.getElementById('pagesvg-workspace');
     if (pageSvgContainer) {
       this.pageSvgView = new MemoryPageSvgView(pageSvgContainer);
       this.pageSvgView.onNavigate = (address) => this._navigatePageSvg(address);
       this.pageSvgView.onClickAnnotationAddr = (address) => this._navigatePageSvg(address);
+      this.pageSvgView.onCheckExecutable = (pageAddr) => {
+        return this.isCodeAddress(pageAddr);
+      };
       this.pageSvgView.setDisconnected();
     }
 
@@ -835,8 +926,14 @@ export default class App {
     const appRoot = document.getElementById('app');
     const tabButtons = document.querySelectorAll('[data-tab-target]');
 
+    // Disable all tabs except Home until data is loaded
+    this._tabsReady = false;
     tabButtons.forEach((button) => {
+      if (button.dataset.tabTarget !== 'timeline') {
+        button.disabled = true;
+      }
       button.addEventListener('click', () => {
+        if (button.disabled) return;
         this.setActiveTab(button.dataset.tabTarget);
       });
     });
@@ -1023,12 +1120,23 @@ export default class App {
     if (!this.state.traceInfo?.available || !this.memoryPageView) return;
     try {
       const position = this.getCurrentTracePosition(positionOverride);
-      const data = await this.apiClient.getPageRender({
-        major: position?.major,
-        minor: position?.minor,
+      const major = position?.major;
+      const minor = position?.minor;
+      // Classification must always use a real memory address — not a trace
+      // position coordinate.  The backend renders the page at RSP, so use the
+      // latest RSP value to decide code vs. data.  If RSP is not yet available
+      // (first frame) default to data.
+      const rsp = String(this.latestRegisters?.rsp ?? '').trim();
+      const sectionPermission = rsp ? this.getSectionPermissionForAddress(rsp) : '';
+      const isCode = sectionPermission.includes('x');
+      const fn = isCode ? this.apiClient.getPageRenderCode : this.apiClient.getPageRenderData;
+      const data = this._attachSectionPermission(await fn.call(this.apiClient, {
+        major, minor,
         threadId: this.state.activeThreadId,
-      });
-      this.memoryPageView.setData(data);
+      }), rsp);
+      this.memoryPageView.setData(data, isCode);
+      const debugEl = document.getElementById('page-debug-meta');
+      if (debugEl) debugEl.textContent = `PE perm: ${data?.sectionPermission || 'none'}`;
     } catch {
       // page route may not be available on all backends
     }
@@ -1060,13 +1168,19 @@ export default class App {
     try {
       const position = this.getCurrentTracePosition();
       const requestedAddress = this.resolvePageRequestAddress('');
-      const data = await this.apiClient.getPageRender({
+      // requestedAddress is already a real memory address (RSP or selected
+      // address) — feed it directly to the central classifier.  Without an
+      // address (empty RSP, no selection) default to data.
+      const sectionPermission = requestedAddress ? this.getSectionPermissionForAddress(requestedAddress) : '';
+      const isCode = sectionPermission.includes('x');
+      const fn = isCode ? this.apiClient.getPageRenderCode : this.apiClient.getPageRenderData;
+      const data = this._attachSectionPermission(await fn.call(this.apiClient, {
         major: position?.major,
         minor: position?.minor,
         threadId: this.state.activeThreadId,
         address: requestedAddress || undefined,
-      });
-      this.pageSvgView.setData(data);
+      }), requestedAddress);
+      this.pageSvgView.setData(data, isCode);
     } catch (err) {
       this.notificationBar?.show(`Page render: ${err.message}`, 'error');
     }
@@ -1076,13 +1190,16 @@ export default class App {
     if (!this.pageSvgView) return;
     try {
       const position = this.getCurrentTracePosition();
-      const data = await this.apiClient.getPageRender({
+      const sectionPermission = this.getSectionPermissionForAddress(address);
+      const isCode = sectionPermission.includes('x');
+      const fn = isCode ? this.apiClient.getPageRenderCode : this.apiClient.getPageRenderData;
+      const data = this._attachSectionPermission(await fn.call(this.apiClient, {
         major: position?.major,
         minor: position?.minor,
         threadId: this.state.activeThreadId,
         address,
-      });
-      this.pageSvgView.setData(data);
+      }), address);
+      this.pageSvgView.setData(data, isCode);
     } catch (err) {
       this.notificationBar?.show(`Page render: ${err.message}`, 'error');
     }

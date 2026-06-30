@@ -1,4 +1,5 @@
 import MemoryPageView from './MemoryPageView.js';
+import { getPeSectionPermission, getPeSectionSpan } from '../utils/PeSectionUtils.js';
 
 const USER_LOW = 0x0000000000010000n;
 const USER_HIGH = 0x00007FFFFFFFFFFFn;
@@ -38,20 +39,6 @@ const PERM_LABELS = {
   rx: 'RX',
   x: 'X',
   rwxc: 'RWXC',
-};
-
-const SECTION_CHAR = {
-  '.text': 'rx',
-  '.code': 'rx',
-  '.rdata': 'r',
-  '.idata': 'r',
-  '.edata': 'r',
-  '.reloc': 'r',
-  '.pdata': 'r',
-  '.rsrc': 'r',
-  '.data': 'rw',
-  '.bss': 'rw',
-  '.tls': 'rw',
 };
 
 export default class MemoryLayoutView {
@@ -918,21 +905,15 @@ export default class MemoryLayoutView {
     if (peData?.sections?.length) {
       const sections = [];
       for (const s of peData.sections) {
-        const rawAddr = s.address || s.virtualAddress;
-        if (!rawAddr) continue;
-        const addr = this._parseAddr(rawAddr);
-        if (addr == null) continue;
-        const size = this._parseAddr(s.virtualSize);
-        if (size == null || size === 0n) continue;
-        const base = item.base + (addr - item.base);
-        const end = base + size - 1n;
-        const perm = SECTION_CHAR[s.name] || 'rw';
+        const span = getPeSectionSpan(s, item.base);
+        if (!span) continue;
+        const perm = getPeSectionPermission(s.characteristics);
 
         sections.push({
           id: `sect:${imageBaseStr}:${s.name}`,
           label: `${s.name}`,
-          base,
-          end,
+          base: span.start,
+          end: span.endExclusive - 1n,
           perm,
           parentId: item.id,
         });

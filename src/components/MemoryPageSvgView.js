@@ -16,8 +16,7 @@ export default class MemoryPageSvgView {
     this._selectedOffset = -1;
     this._hoveredOffset = -1;
     this._categories = null;
-    this._callTargets = null;
-    this._callByteSet = null;
+    this._isCodePage = false;
     this._history = this._loadHistory();
 
     this.onNavigate = null;
@@ -25,7 +24,7 @@ export default class MemoryPageSvgView {
 
     // dk.dll CoordinatesManager constants
     this._GW = 40; this._GH = 30; this._AW = 220; this._OX = 100; this._OY = 100;
-    this._zoomScale = 1.5;
+    this._zoomScale = 1.0;
     this._buildShell();
   }
 
@@ -33,25 +32,16 @@ export default class MemoryPageSvgView {
   setDisconnected() { this._renderPlaceholder('\u25C8', 'Not connected to a debug session.'); }
   setTheme(t) { this._theme = t === 'light' ? 'light' : 'dark'; if (this._data) this._render(); }
 
-  setData(data) {
+  setData(data, isCodePage = false) {
     this._data = data; this._bytes = null; this._categories = null;
-    this._callItems = null;
-    this._callByteSet = null;
     this._disasmItems = null;
+    this._isCodePage = isCodePage;
     this._selectedOffset = this._hoveredOffset = -1;
     if (data?.available) {
       const h = data.bytes ?? '';
       this._bytes = new Uint8Array(0x1000);
       for (let i = 0; i < 0x1000 && i * 2 + 2 <= h.length; i++) this._bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
       this._classify();
-
-      const ann = data.annotations ?? {};
-      this._callItems = ann.ptr2call ?? [];
-      this._callByteSet = new Set();
-      for (const entry of this._callItems) {
-        const len = entry.instrLen || 5;
-        for (let j = 0; j < len; j++) this._callByteSet.add(entry.offset + j);
-      }
 
       this._disasmItems = data.disasm ?? [];
 
@@ -93,10 +83,8 @@ export default class MemoryPageSvgView {
       '    </form>',
       '    <span id="mp-page-info" class="mp-page-info"></span>',
       '    <div class="mp-toolbar-spacer"></div>',
-      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.50\u00D7</span>',
-      '    <span class="mp-zoom-min-label">1.0</span>',
-      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1.5">',
-      '    <span class="mp-zoom-max-label">2.0</span>',
+      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.0\u00D7</span>',
+      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1">',
       '    <button id="mp-btn-theme" class="mp-btn small" type="button">\u263E</button>',
       '  </div>',
       '  <div id="mp-history-row" class="mp-history-row"></div>',
@@ -129,7 +117,7 @@ export default class MemoryPageSvgView {
       this._zoomScale = parseFloat(this._zoomSliderEl.value);
       this._applyZoom();
     });
-    this._zoomLabelEl.addEventListener('click', () => { this._zoomScale = 1.5; this._applyZoom(); });
+    this._zoomLabelEl.addEventListener('click', () => { this._zoomScale = 1.0; this._applyZoom(); });
     this._container.addEventListener('keydown', e => {
       if (e.target.tagName === 'INPUT') return;
       if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) { e.preventDefault(); this._zoom(0.25); return; }
@@ -185,16 +173,6 @@ export default class MemoryPageSvgView {
     // Background
     this._svgEl.appendChild(mk('rect', { x: 0, y: 0, width: canvasW, height: canvasH, fill: bg, stroke: 'none' }));
 
-    // Defs
-    const defs = mk('defs');
-    defs.appendChild(this._arrowhead(NS, 'arrowheadr', arrowC, arrowO));
-    defs.appendChild(this._arrowhead(NS, 'arrowheadg', localC, arrowO));
-    defs.appendChild(this._arrowhead(NS, 'arrowheadb', heapC, arrowO));
-    defs.appendChild(this._arrowhead(NS, 'arrowheadCall', '#a0c8ff', 0.7));
-    defs.appendChild(this._arrowhead(NS, 'arrowheadJmp', '#a0e8a0', 0.7));
-    defs.appendChild(this._arrowhead(NS, 'arrowheadXmod', '#ffc090', 0.7));
-    this._svgEl.appendChild(defs);
-
     const addrBig = BigInt(this._data.pageAddr);
     const rspOff = this._data.rsp ? Number(BigInt(this._data.rsp) - addrBig) : -1;
 
@@ -225,13 +203,10 @@ export default class MemoryPageSvgView {
         const off = r * 8 + c;
         const x = gridX + c * GW, y = OY + r * GH;
         const fill = this._data.colorScheme?.[this._theme]?.[this._colorNames[this._categories[off]]] ?? '#888';
-        const isCallByte = this._callByteSet?.has(off);
-        const cellFill = isCallByte ? 'rgba(200,170,255,0.5)' : fill;
-        const cellStroke = isCallByte ? '#c0a0ff' : '';
         const isRsp = (off === rspOff);
         const selS = this._selectedOffset === off ? '#fff' : this._hoveredOffset === off ? '#aaa' : gridStroke;
         const selW = this._selectedOffset === off ? 2 : 1;
-        gHRects.appendChild(mk('rect', { x, y, width: GW, height: GH, fill: cellFill, stroke: isCallByte ? cellStroke : (isRsp ? '#ff0' : selS), 'stroke-width': isRsp ? 2 : selW, 'data-offset': off, class: 'mp-cell' + (isRsp ? ' mp-cell-rsp' : '') }));
+        gHRects.appendChild(mk('rect', { x, y, width: GW, height: GH, fill, stroke: isRsp ? '#ff0' : selS, 'stroke-width': isRsp ? 2 : selW, 'data-offset': off, class: 'mp-cell' + (isRsp ? ' mp-cell-rsp' : '') }));
         const hex = this._bytes[off].toString(16).toUpperCase().padStart(2, '0');
         gHTexts.appendChild(mk('text', { x: x + 10, y: y + 20, 'font-size': '16', 'pointer-events': 'none' }, hex));
       }
@@ -271,239 +246,170 @@ export default class MemoryPageSvgView {
     }
     this._svgEl.appendChild(gB);
 
-    // ---- 4.5 Disassembly text (integrated into hex grid rows) ----
-    if ((this._disasmItems ?? []).length > 0) {
-      const gDisasm = mk('g');
-      const dColX = gridRight + 12;
-      const offMap = new Map();
-      for (const d of (this._disasmItems ?? [])) offMap.set(d.offset, d);
+    if (this._isCodePage) {
+      this._renderDisasmBadges(NS, mk, addrBig, OY, GH, gridRight, this._disasmItems ?? [], textC);
+    } else {
+      // ---- 5. Annotations ----
+      const defs = mk('defs');
+      defs.appendChild(this._arrowhead(NS, 'arrowheadr', arrowC, arrowO));
+      defs.appendChild(this._arrowhead(NS, 'arrowheadg', localC, arrowO));
+      defs.appendChild(this._arrowhead(NS, 'arrowheadb', heapC, arrowO));
+      this._svgEl.appendChild(defs);
 
-      for (let r = 0; r < ROWS; r++) {
-        const base = r * 8;
-        const matching = [];
-        for (let off = base; off < base + 8; off++) {
-          const d = offMap.get(off);
-          if (d) matching.push(d);
-          else {
-            // also check if an instruction starts before this row and spans into it
-          }
-        }
-        if (matching.length === 0) continue;
+      const gArrows = mk('g'); const gAnnot = mk('g'); const gStr = mk('g');
+      gArrows.setAttribute('stroke', arrowC); gArrows.setAttribute('stroke-width', '3'); gArrows.setAttribute('stroke-opacity', arrowO);
 
-        const y = OY + r * GH + GH / 2 + 5;
-        const textEl = mk('text', { x: dColX, y, fill: '#c0d0b0', 'font-family': 'monospace', 'font-size': '11' });
+      const ann = this._data.annotations ?? {};
+      // ptr2sym
+      for (const s of (ann.ptr2sym ?? [])) {
+        const row = s.offset / 8 | 0, col = s.offset % 8;
+        const py = OY + row * GH + GH / 2;
+        const text = s.targetAddr ?? '', boxX = 1010, boxW = Math.max(180, text.length * 10 + 20);
+        gArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, 'marker-end': 'url(#arrowheadr)' }));
+        const g = mk('g', { 'data-target-addr': text, class: 'mp-annot-clickable' });
+        g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO, stroke: rectS, 'stroke-width': '2', 'data-target-addr': text }));
+        g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': text }, text));
+        if (s.symbol) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, this._esc(s.symbol)));
+        gAnnot.appendChild(g);
+      }
+      // ptr2local — two-step: red arrow → address rect, green bezier → target cell
+      for (const l of (ann.ptr2local ?? [])) {
+        const fr = l.fromOffset / 8 | 0, fc = l.fromOffset % 8;
+        const tr = l.toOffset / 8 | 0;
+        const sy = OY + fr * GH + GH / 2;
+        const ey = OY + tr * GH + GH / 2;
 
-        for (let i = 0; i < matching.length; i++) {
-          const d = matching[i];
-          const parsed = this._parseInstr(d.text);
-          if (!parsed.opcode) continue;
+        const targetAddr = addrBig + BigInt(l.toOffset);
+        const targetText = '0x' + targetAddr.toString(16).padStart(16, '0');
+        const boxX = 1010, boxW = Math.max(180, targetText.length * 10 + 20);
 
-          if (i > 0) textEl.appendChild(mk('tspan', { fill: '#3a5a4a' }, ' \u2502 '));
+        gArrows.appendChild(mk('line', { x1: gridRight, y1: sy, x2: 1000, y2: sy, stroke: arrowC, 'stroke-width': '3', 'stroke-opacity': arrowO, 'marker-end': 'url(#arrowheadr)' }));
 
-          const opColor = this._opcodeColor(parsed.opcode);
-          textEl.appendChild(mk('tspan', { fill: opColor, 'font-weight': '600' }, this._esc(parsed.opcode)));
+        const samePage = (targetAddr >> 12n) === (addrBig >> 12n);
+        const navAttrs = samePage ? {} : { 'data-nav-addr': targetText, class: 'mp-annot-clickable' };
+        gAnnot.appendChild(mk('rect', { x: boxX, y: sy - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO,
+          stroke: samePage ? rectS : '#5aafda', 'stroke-width': '2', ...navAttrs }));
+        gAnnot.appendChild(mk('text', { x: boxX + 10, y: sy + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', ...navAttrs }, targetText));
 
-          for (const op of parsed.operands) {
-            const info = this._classifyOperand(op);
-            const opndColor = this._operandColor(info.type);
-            const clickable = (info.type === 'addr' || info.type === 'sym') ? ' mp-disasm-click' : '';
-            const tspan = mk('tspan', { fill: opndColor, class: clickable });
-            if (info.type === 'addr') tspan.setAttribute('data-nav-addr', info.addr);
-            tspan.textContent = ` ${this._esc(info.text)}`;
-            textEl.appendChild(tspan);
-          }
-        }
+        const diff = l.toOffset - l.fromOffset;
+        const diffStr = diff >= 0 ? `+0x${diff.toString(16)}` : `-0x${(-diff).toString(16)}`;
+        gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: sy + 5, fill: localC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, diffStr));
 
-        gDisasm.appendChild(textEl);
+        const midY = (sy + ey) / 2;
+        const c1x = Math.round((4000 + gridRight) / 5);
+        const c2x = Math.round((1000 + gridRight) / 2);
+        const tc = l.toOffset % 8;
+        const tgtX = gridX + (tc + 1) * GW;
+        gArrows.appendChild(mk('path', { d: `M${1000 - GW},${sy} C${c1x},${sy} ${c2x},${midY} ${gridRight},${ey}`, fill: 'none', stroke: localC, 'stroke-width': '3', 'stroke-opacity': arrowO, 'marker-end': 'url(#arrowheadg)' }));
+      }
+      // ptr2heap
+      for (const h of (ann.ptr2heap ?? [])) {
+        const row = h.offset / 8 | 0, col = h.offset % 8;
+        const py = OY + row * GH + GH / 2;
+        const addr = h.targetAddr ?? '';
+        const boxX = 1010, boxW = Math.max(160, addr.length * 10 + 20);
+        gArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, stroke: heapC, 'stroke-opacity': '0.8', 'marker-end': 'url(#arrowheadb)' }));
+        const g = mk('g', { 'data-target-addr': addr, class: 'mp-annot-clickable' });
+        g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: heapC, 'fill-opacity': '0.2', stroke: heapC, 'stroke-width': '2', 'data-target-addr': addr }));
+        g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: heapC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': addr }, addr));
+        if (h.heapSize) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12' }, `heap 0x${h.heapSize.toString(16)}`));
+        gAnnot.appendChild(g);
+      }
+      // string annotations
+      const strMap = new Map();
+      for (const s of (ann.ptr2astr ?? [])) {
+        const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`"${s.text}"`);
+      }
+      for (const s of (ann.ptr2ustr ?? [])) {
+        const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`L"${s.text.substring(0, 40)}"`);
+      }
+      for (const [off, texts] of strMap) {
+        const row = off / 8 | 0;
+        gStr.appendChild(mk('text', { x: 1400, y: OY + row * GH + GH / 2 + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, texts.join(' | ')));
       }
 
-      this._svgEl.appendChild(gDisasm);
+      this._svgEl.appendChild(gArrows); this._svgEl.appendChild(gAnnot); this._svgEl.appendChild(gStr);
     }
-
-    // ---- 5. Annotations ----
-    const gArrows = mk('g'); const gAnnot = mk('g'); const gStr = mk('g');
-    gArrows.setAttribute('stroke', arrowC); gArrows.setAttribute('stroke-width', '3'); gArrows.setAttribute('stroke-opacity', arrowO);
-
-    const ann = this._data.annotations ?? {};
-    // ptr2sym
-    for (const s of (ann.ptr2sym ?? [])) {
-      const row = s.offset / 8 | 0, col = s.offset % 8;
-      const py = OY + row * GH + GH / 2;
-      const text = s.targetAddr ?? '', boxX = 1010, boxW = Math.max(180, text.length * 10 + 20);
-      gArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, 'marker-end': 'url(#arrowheadr)' }));
-      const g = mk('g', { 'data-target-addr': text, class: 'mp-annot-clickable' });
-      g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO, stroke: rectS, 'stroke-width': '2', 'data-target-addr': text }));
-      g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': text }, text));
-      if (s.symbol) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, this._esc(s.symbol)));
-      gAnnot.appendChild(g);
-    }
-    // ptr2local — two-step: red arrow → address rect, green bezier → target cell
-    for (const l of (ann.ptr2local ?? [])) {
-      const fr = l.fromOffset / 8 | 0, fc = l.fromOffset % 8;
-      const tr = l.toOffset / 8 | 0;
-      const sy = OY + fr * GH + GH / 2; // source row center
-      const ey = OY + tr * GH + GH / 2; // target row center
-
-      const targetAddr = addrBig + BigInt(l.toOffset);
-      const targetText = '0x' + targetAddr.toString(16).padStart(16, '0');
-      const boxX = 1010, boxW = Math.max(180, targetText.length * 10 + 20);
-
-      // Step 1: horizontal red arrow from source cell → annotation box
-      gArrows.appendChild(mk('line', { x1: gridRight, y1: sy, x2: 1000, y2: sy, stroke: arrowC, 'stroke-width': '3', 'stroke-opacity': arrowO, 'marker-end': 'url(#arrowheadr)' }));
-
-      // Address rect + text (centered on source row) — clickable if off-page
-      const samePage = (targetAddr >> 12n) === (addrBig >> 12n);
-      const navAttrs = samePage ? {} : { 'data-nav-addr': targetText, class: 'mp-annot-clickable' };
-      gAnnot.appendChild(mk('rect', { x: boxX, y: sy - GH / 2, width: boxW, height: GH, fill: rectF, 'fill-opacity': rectFO,
-        stroke: samePage ? rectS : '#5aafda', 'stroke-width': '2', ...navAttrs }));
-      gAnnot.appendChild(mk('text', { x: boxX + 10, y: sy + 5, fill: textC, 'font-family': 'monospace', 'font-size': '16', ...navAttrs }, targetText));
-
-      // Offset label
-      const diff = l.toOffset - l.fromOffset;
-      const diffStr = diff >= 0 ? `+0x${diff.toString(16)}` : `-0x${(-diff).toString(16)}`;
-      gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: sy + 5, fill: localC, 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, diffStr));
-
-      // Step 2: green bezier from annotation box → target cell
-      const midY = (sy + ey) / 2;
-      const c1x = Math.round((4000 + gridRight) / 5);
-      const c2x = Math.round((1000 + gridRight) / 2);
-      const tc = l.toOffset % 8;
-      const tgtX = gridX + (tc + 1) * GW;
-      gArrows.appendChild(mk('path', { d: `M${1000 - GW},${sy} C${c1x},${sy} ${c2x},${midY} ${gridRight},${ey}`, fill: 'none', stroke: localC, 'stroke-width': '3', 'stroke-opacity': arrowO, 'marker-end': 'url(#arrowheadg)' }));
-    }
-    // ptr2heap
-    for (const h of (ann.ptr2heap ?? [])) {
-      const row = h.offset / 8 | 0, col = h.offset % 8;
-      const py = OY + row * GH + GH / 2;
-      const addr = h.targetAddr ?? '';
-      const boxX = 1010, boxW = Math.max(160, addr.length * 10 + 20);
-      gArrows.appendChild(mk('line', { x1: gridRight, y1: py, x2: 1000, y2: py, stroke: heapC, 'stroke-opacity': '0.8', 'marker-end': 'url(#arrowheadb)' }));
-      const g = mk('g', { 'data-target-addr': addr, class: 'mp-annot-clickable' });
-      g.appendChild(mk('rect', { x: boxX, y: py - GH / 2, width: boxW, height: GH, fill: heapC, 'fill-opacity': '0.2', stroke: heapC, 'stroke-width': '2', 'data-target-addr': addr }));
-      g.appendChild(mk('text', { x: boxX + 10, y: py + 5, fill: heapC, 'font-family': 'monospace', 'font-size': '16', 'data-target-addr': addr }, addr));
-      if (h.heapSize) gAnnot.appendChild(mk('text', { x: boxX + boxW + 30, y: py + 5, fill: strC, 'font-family': 'monospace', 'font-size': '12' }, `heap 0x${h.heapSize.toString(16)}`));
-      gAnnot.appendChild(g);
-    }
-    // string annotations
-    const strMap = new Map();
-    for (const s of (ann.ptr2astr ?? [])) {
-      const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`"${s.text}"`);
-    }
-    for (const s of (ann.ptr2ustr ?? [])) {
-      const k = s.offset & ~7; if (!strMap.has(k)) strMap.set(k, []); strMap.get(k).push(`L"${s.text.substring(0, 40)}"`);
-    }
-    for (const [off, texts] of strMap) {
-      const row = off / 8 | 0;
-      gStr.appendChild(mk('text', { x: 1400, y: OY + row * GH + GH / 2 + 5, fill: '#ffff00', 'font-family': 'monospace', 'font-size': '12', 'font-style': 'italic' }, texts.join(' | ')));
-    }
-
-    this._svgEl.appendChild(gArrows); this._svgEl.appendChild(gAnnot); this._svgEl.appendChild(gStr);
-
-    // ---- 6. Call/Jump annotations ----
-    const callC = '#a0c8ff';
-    const jmpC = '#a0e8a0';
-    const xmodC = '#ffc090';
-    const gCallArrows = mk('g'); const gCallAnnot = mk('g');
-
-    const rowCalls = new Map();
-    for (const ct of (this._callItems ?? [])) {
-      const row = ct.offset / 8 | 0;
-      if (!rowCalls.has(row)) rowCalls.set(row, []);
-      rowCalls.get(row).push(ct);
-    }
-
-    const displayOccupied = new Set(rowCalls.keys());
-    const nearestEmpty = (srcRow) => {
-      for (let dist = 1; dist < 50; dist++) {
-        const below = srcRow + dist;
-        if (!displayOccupied.has(below)) { displayOccupied.add(below); return below; }
-        const above = srcRow - dist;
-        if (!displayOccupied.has(above)) { displayOccupied.add(above); return above; }
-      }
-      return srcRow;
-    };
-
-    const assignments = [];
-    for (const [srcRow, cts] of rowCalls) {
-      for (let i = 0; i < cts.length; i++) {
-        const displayRow = i === 0 ? srcRow : nearestEmpty(srcRow);
-        assignments.push({ ct: cts[i], srcRow, displayRow });
-      }
-    }
-
-    const displayCounts = new Map();
-    for (const a of assignments) {
-      displayCounts.set(a.displayRow, (displayCounts.get(a.displayRow) ?? 0) + 1);
-    }
-    const displayIdx = new Map();
-
-    for (const a of assignments) {
-      const count = displayCounts.get(a.displayRow) ?? 1;
-      const idx = displayIdx.get(a.displayRow) ?? 0;
-      displayIdx.set(a.displayRow, idx + 1);
-
-      const multi = count > 1;
-      const spacing = multi ? GH / (count + 1) : 0;
-      const yOff = multi ? (idx + 1) * spacing - GH / 2 : 0;
-      const pySrc = OY + a.srcRow * GH + GH / 2;
-      const pyDst = OY + a.displayRow * GH + GH / 2 + yOff;
-
-      const ct = a.ct;
-      const isJmp = (ct.kind === 'jmp' || ct.kind === 'jmp8');
-      const callMod = ct.symbol ? (() => { const b = ct.symbol.indexOf('!'); return b >= 0 ? ct.symbol.slice(0, b).toLowerCase() : ''; })() : '';
-      const isXMod = callMod && this._pageModule && callMod !== this._pageModule;
-      let color = callC;
-      if (isXMod) color = xmodC;
-      else if (isJmp) color = jmpC;
-
-      const kindLabel = ct.kind || 'call';
-      const targetStr = ct.targetAddr ?? '';
-      const addrLabel = kindLabel + ' \u2192 ' + targetStr;
-      const boxX = 1010, boxW = Math.max(220, addrLabel.length * 10 + 20);
-
-      let markerId = 'arrowheadCall';
-      if (isXMod) markerId = 'arrowheadXmod';
-      else if (isJmp) markerId = 'arrowheadJmp';
-
-      gCallArrows.appendChild(mk('line', { x1: gridRight, y1: pySrc, x2: 1000, y2: pyDst, stroke: color, 'stroke-width': '2', 'stroke-opacity': '0.7', 'marker-end': `url(#${markerId})` }));
-
-      const inPage = ct.inPage !== false;
-      const labelFontSize = multi ? 11 : 14;
-      const symFontSize = multi ? 10 : 12;
-      const rectH = multi ? spacing * 0.85 : GH;
-      const rectAttrs = { x: boxX, y: pyDst - rectH / 2, width: boxW, height: rectH, fill: color, 'fill-opacity': '0.12', stroke: color, 'stroke-width': '2' };
-      const tg = mk('g', { class: 'mp-annot-clickable' });
-      if (!inPage) { rectAttrs['data-nav-addr'] = targetStr; tg.setAttribute('data-nav-addr', targetStr); }
-      tg.appendChild(mk('rect', rectAttrs));
-      tg.appendChild(mk('text', { x: boxX + 10, y: pyDst + 5, fill: color, 'font-family': 'monospace', 'font-size': String(labelFontSize) }, addrLabel));
-      gCallAnnot.appendChild(tg);
-
-      if (ct.symbol) {
-        gCallAnnot.appendChild(mk('text', {
-          x: boxX + boxW + 30, y: pyDst + 5,
-          fill: '#c0a0ff', 'font-family': 'monospace', 'font-size': String(symFontSize), 'font-style': 'italic'
-        }, ct.symbol));
-      }
-    }
-    this._svgEl.appendChild(gCallArrows); this._svgEl.appendChild(gCallAnnot);
 
     // Toolbar
     this._addrInputEl.value = this._data.pageAddr;
-    this._pageInfoEl.textContent = `RSP: ${this._data.rsp || '(none)'}`;
+    const perm = this._data.sectionPermission || 'none';
+    this._pageInfoEl.textContent = `RSP: ${this._data.rsp || '(none)'} · PE perm: ${perm}`;
   }
 
-  // ---- Disassembly / Instruction Visualization ----
+  // ---- render disasm badges (code-page right-side) ----
+  _renderDisasmBadges(NS, mk, addrBig, OY, GH, gridRight, disasm, textC) {
+    const rowMap = new Map();
+    for (const insn of disasm) {
+      const row = insn.offset / 8 | 0;
+      if (!rowMap.has(row)) rowMap.set(row, []);
+      rowMap.get(row).push(insn);
+    }
+
+    const BADGE_X = gridRight + 40;
+    const g = mk('g');
+
+    for (const [row, insns] of rowMap) {
+      const py = OY + row * GH + GH / 2;
+      let cx = BADGE_X;
+
+      for (let ii = 0; ii < insns.length; ii++) {
+        if (ii > 0) {
+          g.appendChild(mk('text', { x: cx, y: py + 5, fill: '#555', 'font-family': 'monospace', 'font-size': '14' }, '\u00A6'));
+          cx += 20;
+        }
+
+        const insn = insns[ii];
+        const text = String(insn.text ?? '').trimStart();
+        const parsed = this._parseInstr(text);
+        if (!parsed.opcode) continue;
+
+        // Opcode badge
+        const opColors = this._opcodeBadgeColors(parsed.opcode);
+        const ow = Math.max(30, parsed.opcode.length * 10 + 16);
+        g.appendChild(mk('rect', { x: cx, y: py - GH / 2 + 2, width: ow, height: GH - 4,
+          fill: opColors.fill, stroke: opColors.stroke, 'stroke-width': '1.5', rx: '3', ry: '3' }));
+        g.appendChild(mk('text', { x: cx + 8, y: py + 5, fill: opColors.text, 'font-family': 'monospace', 'font-size': '13' }, parsed.opcode));
+        cx += ow + 4;
+
+        // Operand badges
+        for (const op of parsed.operands) {
+          const info = this._classifyOperand(op);
+          const colors = this._operandBadgeColors(info.type);
+          const bw = Math.max(30, info.text.length * 10 + 16);
+
+          const rectAttrs = { x: cx, y: py - GH / 2 + 2, width: bw, height: GH - 4,
+            fill: colors.fill, stroke: colors.stroke, 'stroke-width': '1.5', rx: '3', ry: '3' };
+
+          if (info.addr) {
+            const tg = mk('g', { class: 'mp-annot-clickable', 'data-nav-addr': info.addr });
+            tg.appendChild(mk('title', {}, `Navigate to ${info.addr}`));
+            tg.appendChild(mk('rect', rectAttrs));
+            tg.appendChild(mk('text', { x: cx + 8, y: py + 5, fill: colors.text, 'font-family': 'monospace', 'font-size': '13' }, info.text));
+            g.appendChild(tg);
+          } else {
+            g.appendChild(mk('rect', rectAttrs));
+            g.appendChild(mk('text', { x: cx + 8, y: py + 5, fill: colors.text, 'font-family': 'monospace', 'font-size': '13' }, info.text));
+          }
+          cx += bw + 4;
+        }
+      }
+    }
+    this._svgEl.appendChild(g);
+  }
+
+  // ---- Disassembly parsing ----
 
   _parseInstr(text) {
     const trimmed = (text || '').trim();
     if (!trimmed) return { opcode: '', operands: [] };
-
-    // Split opcode from operands — opcode is first whitespace-delimited token
-    const spaceIdx = trimmed.search(/\s/);
-    const opcode = spaceIdx >= 0 ? trimmed.slice(0, spaceIdx) : trimmed;
-    const rest = spaceIdx >= 0 ? trimmed.slice(spaceIdx).trim() : '';
-
-    // Split operands, respecting brackets and parentheses
+    const tokens = trimmed.split(/\s+/);
+    let i = 0;
+    if (i < tokens.length && /^(?:0x)?[0-9a-fA-F]+['`][0-9a-fA-F]+$/.test(tokens[i])) i++;
+    while (i < tokens.length && /^[0-9a-fA-F]+$/.test(tokens[i])) i++;
+    if (i >= tokens.length) return { opcode: '', operands: [] };
+    const opcode = tokens[i];
+    const rest = tokens.slice(i + 1).join(' ').trim();
     const operands = this._splitOperands(rest);
     return { opcode, operands };
   }
@@ -511,8 +417,7 @@ export default class MemoryPageSvgView {
   _splitOperands(str) {
     if (!str) return [];
     const parts = [];
-    let depth = 0;
-    let start = 0;
+    let depth = 0, start = 0;
     for (let i = 0; i < str.length; i++) {
       const c = str[i];
       if (c === '(' || c === '[' || c === '<') depth++;
@@ -527,29 +432,66 @@ export default class MemoryPageSvgView {
   }
 
   _classifyOperand(op) {
-    const addrMatch = op.match(/0x[0-9a-fA-F`]+/);
-    if (addrMatch) return { type: 'addr', text: op, addr: addrMatch[0] };
-    if (/[a-z]+![a-z_]/i.test(op)) return { type: 'sym', text: op };
+    const addr = this._extractNavigableAddress(op);
+    if (addr) return { type: /[a-z]+![a-z_]/i.test(op) ? 'sym' : 'addr', text: op, addr };
+    if (/[a-z]+![a-z_]/i.test(op)) return { type: 'sym', text: op, addr: null };
     return { type: 'other', text: op };
   }
 
-  _opcodeColor(opcode) {
-    const op = opcode.toLowerCase();
-    if (op === 'call') return '#ff4444';
-    if (op === 'ret' || op === 'retn') return '#c586c0';
-    if (/^j(mp|[a-z])/.test(op)) return '#ffa94d';
-    if (op === 'push') return '#569cd6';
-    if (op === 'pop') return '#569cd6';
-    if (op === 'cmp' || op === 'test') return '#dcdcaa';
-    if (op === 'int' || op === 'syscall') return '#f44747';
-    if (op === 'nop') return '#6a9955';
-    return '#9cdcfe';
+  _extractNavigableAddress(op) {
+    const text = String(op ?? '').trim();
+    if (!text) return null;
+
+    const candidates = [];
+    const hexMatches = text.match(/0x[0-9a-fA-F`]+/g) ?? [];
+    const dbgMatches = text.match(/\b[0-9a-fA-F]{1,8}`[0-9a-fA-F]{1,16}\b/g) ?? [];
+    const plainMatches = text.match(/\b[0-9a-fA-F]{8,16}\b/g) ?? [];
+    candidates.push(...hexMatches, ...dbgMatches, ...plainMatches);
+
+    for (const candidate of candidates) {
+      const normalized = this._normalizeAddressCandidate(candidate);
+      if (!normalized) continue;
+      if (this._isNavigableAddress(normalized)) return normalized;
+    }
+    return null;
   }
 
-  _operandColor(type) {
-    if (type === 'addr') return '#ce9178';
-    if (type === 'sym') return '#c586c0';
-    return '#8ac8b8';
+  _normalizeAddressCandidate(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return null;
+    const compact = raw.replace(/`/g, '');
+    const body = compact.replace(/^0x/i, '');
+    if (!/^[0-9a-fA-F]+$/.test(body)) return null;
+    return '0x' + body.toLowerCase();
+  }
+
+  _isNavigableAddress(addrText) {
+    try {
+      const value = BigInt(addrText);
+      if (value === 0n || value === 1n) return false;
+      if (value === 0xFFFFFFFFn || value === 0xFFFFFFFFFFFFFFFFn) return false;
+      return value >= 0x0000000000010000n && value <= 0x00007FFFFFFFFFFFn;
+    } catch {
+      return false;
+    }
+  }
+
+  _opcodeBadgeColors(opcode) {
+    const op = opcode.toLowerCase();
+    if (op === 'call')   return { fill: 'rgba(255,68,68,0.15)',    stroke: 'rgba(255,68,68,0.45)',    text: '#ff4444' };
+    if (op === 'ret' || op === 'retn') return { fill: 'rgba(197,134,192,0.15)', stroke: 'rgba(197,134,192,0.45)', text: '#c586c0' };
+    if (/^j(mp|[a-z])/.test(op)) return { fill: 'rgba(255,169,77,0.15)', stroke: 'rgba(255,169,77,0.45)', text: '#ffa94d' };
+    if (op === 'push' || op === 'pop') return { fill: 'rgba(86,156,214,0.15)', stroke: 'rgba(86,156,214,0.45)', text: '#569cd6' };
+    if (op === 'cmp' || op === 'test')  return { fill: 'rgba(220,220,170,0.15)', stroke: 'rgba(220,220,170,0.45)', text: '#dcdcaa' };
+    if (op === 'int' || op === 'syscall') return { fill: 'rgba(244,71,71,0.15)', stroke: 'rgba(244,71,71,0.45)', text: '#f44747' };
+    if (op === 'nop') return { fill: 'rgba(106,153,85,0.15)',   stroke: 'rgba(106,153,85,0.45)',   text: '#6a9955' };
+    return { fill: 'rgba(79,193,255,0.15)',  stroke: 'rgba(79,193,255,0.40)',  text: '#4fc1ff' };
+  }
+
+  _operandBadgeColors(type) {
+    if (type === 'addr') return { fill: 'rgba(206,145,120,0.15)', stroke: 'rgba(206,145,120,0.45)', text: '#ce9178' };
+    if (type === 'sym')  return { fill: 'rgba(197,134,192,0.15)', stroke: 'rgba(197,134,192,0.45)', text: '#c586c0' };
+    return { fill: 'rgba(138,200,184,0.12)', stroke: 'rgba(138,200,184,0.30)', text: '#8ac8b8' };
   }
 
   _arrowhead(NS, id, color, opacity) {
