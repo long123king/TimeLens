@@ -55,7 +55,7 @@ function deliverArchive(archive) {
   }
 }
 
-const BUNDLED_STORYLINE_URL = '/storyline-1783155058679.storyline.json';
+const BUNDLED_STORYLINE_URL = `${import.meta.env.BASE_URL}storyline-1783155058679.storyline.json`;
 
 async function tryLoadBundledStoryline() {
   try {
