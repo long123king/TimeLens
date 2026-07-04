@@ -35,6 +35,20 @@ export default class Controls {
       }
     });
 
+    // Keyboard replay controls
+    document.addEventListener('keydown', (e) => {
+      if (!this.onReplayKey) return;
+      const target = e.target;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return;
+      if (e.code === 'Space' && !e.shiftKey) {
+        e.preventDefault();
+        this.onReplayKey('advance');
+      } else if (e.code === 'Space' && e.shiftKey) {
+        e.preventDefault();
+        this.onReplayKey('retreat');
+      }
+    });
+
     // Zoom controls
     document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
       if (this.onZoom) {
@@ -184,4 +198,5 @@ export default class Controls {
   onStep = null;
   onZoom = null;
   onViewToggle = null;
+  onReplayKey = null;
 }

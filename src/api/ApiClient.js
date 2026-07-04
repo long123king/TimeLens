@@ -38,6 +38,19 @@ export default class ApiClient {
     this._activeStart = 0;      // timestamp when current item started
     this._nextId = 1;
     this._history = [];         // [{ id, label, priority, path, startTime, endTime, elapsedMs, status, error? }]
+    this._recording = true;
+    this._recordingBuffer = []; // [{ path, status, duration, responseBody, responseText }]
+    this._interceptor = null;   // StorylineInterceptor instance for replay mode
+  }
+
+  drainRecordingBuffer() {
+    const buf = this._recordingBuffer;
+    this._recordingBuffer = [];
+    return buf;
+  }
+
+  setInterceptor(interceptor) {
+    this._interceptor = interceptor || null;
   }
 
   /**
@@ -112,9 +125,9 @@ export default class ApiClient {
   }
 
   /** Enqueue a request. priority: 'normal' (default) or 'high'. */
-  _enqueue(fn, { priority = 'normal', label = '' } = {}) {
+  _enqueue(fn, { priority = 'normal', label = '', _path = '' } = {}) {
     return new Promise((resolve, reject) => {
-      const item = { id: this._nextId++, fn, resolve, reject, priority, label };
+      const item = { id: this._nextId++, fn, resolve, reject, priority, label, _path };
       if (priority === 'high') {
         // Insert after any currently-processing item, before other queued items
         const firstNormal = this._queue.findIndex(i => i.priority !== 'high');
@@ -142,10 +155,29 @@ export default class ApiClient {
         const result = await item.fn(this._activeController.signal);
         item.resolve(result);
         this._addHistory(item, 'ok', this._activeStart, Date.now());
+        if (this._recording && !this._interceptor?.active) {
+          const isText = typeof result === 'string';
+          this._recordingBuffer.push({
+            path: item._path || '',
+            status: 200,
+            duration: Date.now() - this._activeStart,
+            responseType: isText ? 'text' : 'json',
+            responseBody: isText ? null : result,
+            responseText: isText ? result : null,
+          });
+        }
       } catch (err) {
         item.reject(err);
         this._addHistory(item, 'error', this._activeStart, Date.now(),
           err.message || err.code || String(err));
+        if (this._recording && !this._interceptor?.active) {
+          this._recordingBuffer.push({
+            path: item._path || '',
+            status: err.status || 0,
+            duration: Date.now() - this._activeStart,
+            responseBody: null,
+          });
+        }
       } finally {
         this._activeController = null;
         this._activeLabel = '';
@@ -413,42 +445,17 @@ export default class ApiClient {
     throw lastError;
   }
 
-  /**
-   * Install a map of pre-recorded responses for replay mode.
-   * Keys are full URL paths (e.g. '/api/ttd/trace-info'); values are
-   * storyline request objects with `status`, `responseBody`, `responseText`,
-   * and `responseType` fields.
-   */
-  installMockResponses(responseMap) {
-    this._mockResponseMap = responseMap;
-  }
-
   async _fetchWithTimeout(url, requestId, timeoutMs, _queueSignal = null) {
-    if (this._mockResponseMap) {
-      // Normalise to path+search so both relative ('/api/…?q=1') and
-      // absolute ('http://host/api/…?q=1') URLs match the stored entries,
-      // while still preserving query-string differentiation (e.g. PE bases).
-      let lookupKey;
-      try {
-        const parsed = new URL(url, 'http://localhost');
-        lookupKey = parsed.pathname + parsed.search;
-      } catch {
-        lookupKey = url;
-      }
-      const entry = this._mockResponseMap[lookupKey] ?? this._mockResponseMap[url];
-      if (entry !== undefined) {
-        const bodyText = entry.responseType === 'text'
-          ? (entry.responseText ?? '')
-          : JSON.stringify(entry.responseBody ?? {});
-        return new Response(bodyText, {
-          status: entry.status ?? 200,
-          headers: { 'Content-Type': entry.responseType === 'text' ? 'text/plain' : 'application/json' },
+    if (this._interceptor?.active) {
+      const fixture = this._interceptor.intercept(url);
+      if (fixture) {
+        await new Promise((r) => setTimeout(r, 20));
+        const body = fixture.text ?? JSON.stringify(fixture.body);
+        return new Response(body, {
+          status: fixture.status,
+          headers: { 'content-type': fixture.contentType || 'application/json' },
         });
       }
-      return new Response(
-        '{"error":{"code":"NOT_FOUND","message":"Endpoint not in storyline"}}',
-        { status: 404 },
-      );
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);

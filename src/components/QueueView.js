@@ -15,9 +15,32 @@ export default class QueueView {
 
     // Callback set by App: () => { processing, queueLength, items, history, activeLabel, activeStart }
     this.onGetState = null;
+    this.onExport = null;
+    this.onLoadStoryline = null;
 
     this._buildShell();
+    document.getElementById('q-btn-export')?.addEventListener('click', () => {
+      this.onExport?.();
+    });
+    document.getElementById('q-btn-load-storyline')?.addEventListener('click', () => {
+      this._fileInput?.click();
+    });
+    this._fileInput?.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (file) this._handleFile(file);
+      e.target.value = '';
+    });
     this._timer = setInterval(() => this._refresh(), POLL_INTERVAL_MS);
+  }
+
+  async _handleFile(file) {
+    try {
+      const text = await file.text();
+      const archive = JSON.parse(text);
+      this.onLoadStoryline?.(archive);
+    } catch (err) {
+      console.error('[QueueView] Failed to load storyline file:', err);
+    }
   }
 
   setActive(_active) {}
@@ -30,7 +53,12 @@ export default class QueueView {
     this._container.innerHTML = [
       '<div class="q-view-toolbar">',
       '  <div class="q-view-toolbar-title">Request Queue</div>',
-      '  <div class="q-view-toolbar-subtitle">History + live state · 300ms poll</div>',
+      '  <div class="q-view-toolbar-right">',
+      '    <button class="q-view-toolbar-btn q-btn-load-storyline" id="q-btn-load-storyline" title="Load a .storyline.json archive and enter replay mode">Load Storyline…</button>',
+      '    <button class="q-view-toolbar-btn q-btn-export" id="q-btn-export" title="Export storyline archive">Export</button>',
+      '    <input type="file" id="q-file-input" accept=".json,application/json" style="display:none">',
+      '    <div class="q-view-toolbar-subtitle">History + live state · 300ms poll</div>',
+      '  </div>',
       '</div>',
       '<div class="q-view-body">',
       '  <section class="q-view-section">',
@@ -100,6 +128,7 @@ export default class QueueView {
     ].join('');
 
     this._meta = this._container.querySelector('#q-view-state-meta');
+    this._fileInput = this._container.querySelector('#q-file-input');
     this._valProcessing = this._container.querySelector('#q-val-processing');
     this._valActive = this._container.querySelector('#q-val-active');
     this._valQueued = this._container.querySelector('#q-val-queued');

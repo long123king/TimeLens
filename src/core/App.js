@@ -21,6 +21,10 @@ import FlameGraphView from '../components/FlameGraphView.js';
 import QueueView from '../components/QueueView.js';
 import PositionView from '../components/PositionView.js';
 import HomeView from '../components/HomeView.js';
+import ReplayBar from '../components/ReplayBar.js';
+import StorylineRecorder from './StorylineRecorder.js';
+import StorylinePlayer from './StorylinePlayer.js';
+import StorylineInterceptor from '../api/StorylineInterceptor.js';
 import { MIN_ZOOM_LEVEL, MAX_ZOOM_LEVEL } from '../utils/ZoomController.js';
 import { getPeSectionPermission, getPeSectionSpan, parsePeBigInt } from '../utils/PeSectionUtils.js';
 import { treemap, treemapSquarify, hierarchy } from 'd3-hierarchy';
@@ -32,14 +36,17 @@ const TIMELINE_HEIGHT = 220; // fallback only; actual height from viewport.timel
  * Coordinates all components and manages application state
  */
 export default class App {
-  constructor(pixiApp) {
+  constructor(pixiApp, options = {}) {
     this.pixiApp = pixiApp;
+    this._storylineArchive = options.storylineArchive || options.storylinArchive || null;
     // API layer must be created before DataManager so callstack requests
     // flow through the shared request queue
     this.apiClient = new ApiClient();
     this.connectionMonitor = new ConnectionMonitor(this.apiClient);
     this.dataManager = new DataManager(this.apiClient);
     this.viewport = new Viewport(pixiApp);
+    this._recorder = null;       // StorylineRecorder (recording mode)
+    this._player = null;         // StorylinePlayer (replay mode)
 
     // Application state
     this.state = {
@@ -77,6 +84,7 @@ export default class App {
     this.memaccessView = null;
     this.flamegraphView = null;
     this.queueView = null;
+    this.replayBar = null;
     this.positionView = null;
     this.homeView = null;
     this._threadLifetimes = new Map(); // threadId → { start, end }
@@ -99,6 +107,17 @@ export default class App {
       this.connectionPanel.onStopRequested = () => this._requestServerStop();
       this.connectionPanel.setDisconnected();
 
+      // ReplayBar is independent of the rest of the workspace, so mount it
+      // early so _initReplayMode can drive it before initializeComponents().
+      this.replayBar = new ReplayBar();
+      this.replayBar.onPrev = () => this._player?.retreat();
+      this.replayBar.onNext = () => this._player?.advance();
+      this.replayBar.onReset = async () => {
+        if (!this._player) return;
+        await this._player.goTo(0);
+      };
+      this.replayBar.hide();
+
       document.querySelectorAll('[data-nav]').forEach(el => {
         if (el.closest('#workspace-tabs')) return;
         el.addEventListener('click', (e) => {
@@ -111,11 +130,14 @@ export default class App {
               this._openPosition(pos.major, Number(pos.minor ?? 0), tid);
             } else {
               this.setActiveTab('position');
+              this._recordUserAction('tab-switch', { tabTarget: 'position' }, 'Tab → "position"');
             }
           } else if (target === 'position') {
             this.setActiveTab('position');
+            this._recordUserAction('tab-switch', { tabTarget: 'position' }, 'Tab → "position"');
           } else {
             this.setActiveTab(target);
+            this._recordUserAction('tab-switch', { tabTarget: target }, `Tab → "${target}"`);
           }
         });
       });
@@ -124,10 +146,19 @@ export default class App {
         this._handleConnectionChange(connected, serverData);
       this.connectionMonitor.onStatusUpdate = (statusResponse) =>
         this._handleStatusUpdate(statusResponse);
+
+      if (this._isReplayMode()) {
+        await this._initReplayMode();
+      }
+
       this.connectionMonitor.start();
 
       // Load scaffold data (falls back to mock until Phase 2-5 routes are live)
       await this.loadInitialData();
+
+    if (!this._isReplayMode()) {
+      this._recorder = new StorylineRecorder(this.apiClient);
+    }
 
     // Initialize components
     this.initializeComponents();
@@ -139,6 +170,7 @@ export default class App {
     // Setup animation loop
     this.setupAnimationLoop();
 
+    this._initialized = true;
     console.log('Application initialized');
   }
 
@@ -148,37 +180,275 @@ export default class App {
     this.state.events = [];
   }
 
-  /**
-   * Enter replay mode using a pre-recorded storyline archive.
-   * Stops the live connection monitor, installs mock responses from all
-   * recorded steps, then simulates a successful connection so the full
-   * data-fetch flow (trace info, modules, threads, …) runs against the
-   * recorded data and populates the HomeView.
-   */
-  loadStorylineArchive(archive) {
-    if (!archive?.steps?.length) return;
+  _isReplayMode() {
+    return !!this._storylineArchive;
+  }
 
-    // Build a response map keyed by full API path (first occurrence wins so
-    // the earliest — typically the init step — takes precedence).
-    const responseMap = {};
-    for (const step of archive.steps) {
-      for (const req of (step.requests ?? [])) {
-        if (req.path && !(req.path in responseMap)) {
-          responseMap[req.path] = req;
+  async _initReplayMode() {
+    let archive = this._storylineArchive;
+    // Filter out spurious timeline-seek steps that are artifacts of the
+    // thread-select handler (it used to call handleTimeCommit, which
+    // recorded an extra timeline-seek). A spurious step has the form
+    // timeline-seek followed by a thread-select with the same timestamp.
+    archive = this._stripSpuriousTimelineSeeks(archive);
+    this._storylineArchive = archive;
+
+    const interceptor = new StorylineInterceptor();
+    this.apiClient.setInterceptor(interceptor);
+
+    this._player = new StorylinePlayer(archive, this.apiClient, interceptor);
+
+    const refreshReplayBar = () => {
+      if (!this.replayBar || !this._player) return;
+      const idx = this._player.currentIndex;
+      // Before any step is applied (idx === -1) preview step 0 so the
+      // user knows what Next will do; afterwards show the just-applied step.
+      const step = this._player.currentStep
+                ?? (this._player.totalSteps > 0 ? this._player.steps[0] : null);
+      this.replayBar.setCurrentStep(
+        idx,
+        this._player.totalSteps,
+        step?.type ?? '',
+        step?.description ?? '',
+      );
+      this.replayBar.setAvailability({
+        canAdvance: this._player.canAdvance,
+        canRetreat: this._player.canRetreat,
+      });
+    };
+
+    this._player.onStepReplayed = (index) => {
+      refreshReplayBar();
+      const step = this._player.currentStep;
+      if (step) {
+        this.notificationBar.show(
+          `Step ${index + 1}/${archive.stepCount}: ${step.type} — ${step.description}`,
+          'info',
+        );
+      }
+    };
+
+    this._player.setActionHandlers({
+      'init': () => {},
+      'tab-switch': (a) => { this.setActiveTab(a.tabTarget); },
+      'timeline-seek': (a) => {
+        // Switch to the Timeline tab so the user can see the seek
+        // happen. Without this, a timeline-seek recorded while the user
+        // was on another tab (e.g. after a module-click) produces no
+        // visible UI change during replay.
+        this.setActiveTab('timeline');
+        if (a.time != null) this.state.currentTime = a.time;
+        this.handleTimeCommit(this.state.currentTime, a.position ?? null);
+      },
+      'thread-select': (a) => {
+        // Switch to the Timeline tab so the user can see the thread
+        // selection update in the thread lanes.
+        this.setActiveTab('timeline');
+        this.state.activeThreadId = a.threadId;
+        this._renderTimelineThreadsMeta();
+        this.timeline?.setActiveThreadId(a.threadId);
+        this.handleTimeCommit(this.state.currentTime);
+      },
+      'address-click': (a) => { this.handleAddressSelect(a.address); },
+      'module-click': (a) => {
+        if (a?.target === 'pe') {
+          this._openModuleInPe(a.address);
+        } else {
+          this._openModuleInMemoryLayout(a.address);
         }
+      },
+      'position-open': (a) => {
+        this.setActiveTab('position');
+        this.positionView?.load(a.major, a.minor, a.threadId);
+      },
+      'page-navigate': (a) => {
+        this.setActiveTab('page');
+        this._navigatePageSvg(a.address);
+      },
+      'search': (a) => { this._replaySearch(a); },
+      'command': (a) => { this._replayCommand(a); },
+      'mem-access': (a) => { this._replayMemAccess(a); },
+      'flamegraph': (a) => { this._replayFlamegraph(a); },
+      'auto': (a) => { /* no UI side-effect for 'auto' steps */ },
+    });
+
+    this._player.setResetHandler(async () => {
+      this.state.currentTime = 0;
+      this.state.currentPosition = null;
+      this.state.activeTab = 'timeline';
+      this.state.activeThreadId = null;
+      this.state.selectedAddress = null;
+      this.state.selectedPeImageBase = '';
+      this.setActiveTab('timeline');
+      refreshReplayBar();
+    });
+
+    interceptor.loadArchive(archive);
+
+    this.replayBar?.show();
+    refreshReplayBar();
+
+    this.notificationBar.show(
+      `Replay mode — ${archive.stepCount} steps, ${archive.requestCount} requests. Press Space / Shift+Space to step.`,
+      'info',
+    );
+
+    // Establish the home/reset state but DO NOT auto-apply step 0.
+    // The user starts the replay from a clean Timeline view and
+    // explicitly advances with Next / Space.
+    if (this._player._onReset) {
+      await this._player._onReset();
+    }
+    refreshReplayBar();
+  }
+
+  // -- replay action handlers ------------------------------------------------
+
+  _replaySearch(action) {
+    const category = action?.category;
+    const query = action?.searchQuery ?? action?.query ?? '';
+    if (category === 'function-calls') {
+      this.setActiveTab('function');
+      if (this.functionCallBrowser && query) {
+        this.functionCallBrowser.input.value = String(query);
+        this.functionCallBrowser.handleSubmit();
+      }
+    } else if (category === 'strings') {
+      this.setActiveTab('strings');
+      if (this.stringsView && query) {
+        this.stringsView._queryInput.value = String(query);
+        if (action?.limit) this.stringsView._limitInput.value = String(action.limit);
+        this.stringsView._submitSearch();
       }
     }
+  }
 
-    // Stop polling the real server; we're running from recorded data.
-    this.connectionMonitor.stop();
+  async _replayCommand(action) {
+    const command = action?.commandText;
+    if (!command) return;
+    this.setActiveTab('command');
+    if (this.commandConsole) {
+      if (this.commandConsole.input) {
+        this.commandConsole.input.value = String(command);
+      }
+      await this.commandConsole.handleSubmit();
+      // CommandConsole.handleSubmit clears the input in its finally block
+      // (normal user flow). For replay we want the command to remain
+      // visible in the input so the user can see what was just executed,
+      // matching how function-calls / strings / mem-access retain their
+      // inputs after submit.
+      if (this.commandConsole.input) {
+        this.commandConsole.input.value = String(command);
+      }
+    }
+  }
 
-    // Route all ApiClient requests through the recorded responses.
-    this.apiClient.installMockResponses(responseMap);
+  _replayMemAccess(action) {
+    const startAddr = action?.startAddr;
+    const endAddr = action?.endAddr;
+    const mode = action?.mode ?? 'W';
+    if (!this.memaccessView) {
+      this.setActiveTab('memaccess');
+      return;
+    }
+    this.setActiveTab('memaccess');
+    const view = this.memaccessView;
+    this.apiClient.drainQueue();
+    requestAnimationFrame(() => {
+      view.acceptPrefill(String(startAddr), String(endAddr), String(mode));
+      if (action?.timeStartPct != null && view._timeStartPctInput) {
+        view._timeStartPctInput.value = String(action.timeStartPct);
+      }
+      if (action?.timeEndPct != null && view._timeEndPctInput) {
+        view._timeEndPctInput.value = String(action.timeEndPct);
+      }
+      // Only re-fire a search when the original action had a time range
+      // (i.e. this was a recorded Search click, not just a flamegraph prefill).
+      if (action?.timeStartPct != null || action?.timeEndPct != null) {
+        view._submitSearch();
+      }
+    });
+  }
 
-    // Trigger the normal connection flow so HomeView and all other views
-    // receive their data exactly as they would from a live server.
-    const serverData = responseMap['/api/server/status']?.responseBody ?? null;
-    this._handleConnectionChange(true, serverData);
+  _replayFlamegraph(action) {
+    // Show the Flame Graph tab. The frame the user clicked is already
+    // present in the view's rendered data (loaded from the fixture map
+    // when the tab was first activated), so we do NOT re-fire onClickFrame:
+    // doing so would call _openMemAccessRange and navigate away from this
+    // tab to memaccess, which is the wrong destination for a flamegraph
+    // step (mem-access is its own separate step in the archive).
+    this.setActiveTab('flamegraph');
+  }
+
+  /**
+   * Load a storyline archive and enter replay mode at runtime.
+   * Safe to call before initialize() — the archive will be picked up
+   * once initialization reaches the replay-mode branch.
+   */
+  loadStorylineArchive(archive) {
+    if (!archive || !Array.isArray(archive.steps)) {
+      this.notificationBar?.show('Invalid storyline archive (missing steps[])', 'error');
+      return false;
+    }
+    this._storylineArchive = archive;
+    if (this._isReplayMode() && this._initialized) {
+      this._initReplayMode().catch((err) => {
+        this.notificationBar?.show(`Replay init failed: ${err.message}`, 'error');
+      });
+    } else {
+      this.notificationBar?.show(
+        `Storyline queued (${archive.stepCount} steps) — will load after init`,
+        'info',
+      );
+    }
+    return true;
+  }
+
+  _stripSpuriousTimelineSeeks(archive) {
+    if (!archive?.steps?.length) return archive;
+    const out = [];
+    for (let i = 0; i < archive.steps.length; i++) {
+      const step = archive.steps[i];
+      const next = archive.steps[i + 1];
+      // Drop a timeline-seek step that is immediately followed by a
+      // thread-select with the same timestamp. Such a step was a recording
+      // artifact of the thread-select handler (it called handleTimeCommit
+      // internally, which recorded a no-op timeline-seek).
+      if (step?.type === 'timeline-seek'
+          && next?.type === 'thread-select'
+          && step.timestamp === next.timestamp) {
+        continue;
+      }
+      out.push(step);
+    }
+    if (out.length === archive.steps.length) return archive;
+    return { ...archive, steps: out, stepCount: out.length };
+  }
+
+  async _recordUserAction(type, action = {}, description = '') {
+    if (!this._recorder) return;
+    // Coalesce mem-access: a probe is a single user action, regardless of
+    // how many progressive Search clicks the user did within it. When a
+    // mem-access action follows a mem-access step, overwrite the last step
+    // in place so the archive stores the final probe state.
+    if (type === 'mem-access' && this._recorder.steps.length > 0) {
+      const last = this._recorder.steps[this._recorder.steps.length - 1];
+      if (last.type === 'mem-access') {
+        try { await this.apiClient.waitForIdle(3000); } catch {}
+        const requests = this.apiClient.drainRecordingBuffer();
+        last.action = action;
+        last.description = description;
+        last.timestamp = Date.now();
+        last.relativeMs = Date.now() - this._recorder.startTime;
+        last.requests = requests ?? [];
+        return;
+      }
+    }
+    try {
+      await this.apiClient.waitForIdle(3000);
+    } catch {}
+    const requests = this.apiClient.drainRecordingBuffer();
+    this._recorder.capture({ type, action, description, requests });
   }
 
     // ---------- Phase 1 connection handling ----------------------------------
@@ -196,6 +466,7 @@ export default class App {
         this.memaccessView?.setDisconnected();
         this.flamegraphView?.setDisconnected();
         this.queueView?.setDisconnected();
+        this.replayBar?.hide();
         this.positionView?.setDisconnected();
         this.homeView?.setDisconnected();
         if (this.state.traceInfo !== null) {
@@ -278,6 +549,10 @@ export default class App {
       document.querySelectorAll('[data-tab-target]').forEach((button) => {
         button.disabled = false;
       });
+
+      if (this._recorder && this._recorder.steps.length === 0) {
+        this._recorder.captureInit();
+      }
     }
 
     async _fetchModules() {
@@ -513,6 +788,14 @@ export default class App {
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
+    _toHex(value) {
+      try {
+        return BigInt(String(value ?? '0')).toString(16).toUpperCase();
+      } catch {
+        return '0';
+      }
+    }
+
     async _fetchMemoryLayout() {
       if (!this.memoryLayoutView) return;
       this.memoryLayoutView.setLoading(true);
@@ -547,6 +830,11 @@ export default class App {
       const normalizedAddress = this.toDisplayAddress(address);
       this.state.selectedPeImageBase = normalizedAddress;
       this.setActiveTab('pe');
+      // Record the PE navigation as a single step. The address is captured
+      // so replay can restore both the tab and the selected module.
+      this._recordUserAction('module-click',
+        { address: normalizedAddress, target: 'pe' },
+        `Module → ${normalizedAddress} (PE)`);
     }
 
     _openModuleInMemoryLayout(addrHex) {
@@ -554,9 +842,11 @@ export default class App {
         this.memoryLayoutView.focusModule(addrHex);
       }
       this.setActiveTab('memorylayout');
+      this._recordUserAction('module-click',
+        { address: addrHex }, `Module → ${addrHex}`);
     }
 
-    _openMemAccessRange(startAddrHex, endAddrHex, mode = 'R') {
+    _openMemAccessRange(startAddrHex, endAddrHex, mode = 'R', { record = true } = {}) {
       // Clamp to 4-byte max range
       try {
         const start = BigInt(startAddrHex);
@@ -571,6 +861,11 @@ export default class App {
       requestAnimationFrame(() => {
         this.memaccessView?.acceptPrefill(startAddrHex, endAddrHex, mode);
       });
+      if (record) {
+        this._recordUserAction('mem-access',
+          { startAddr: startAddrHex, endAddr: endAddrHex, mode },
+          `Mem-access ${mode} ${startAddrHex}–${endAddrHex}`);
+      }
     }
 
     async _openPosition(major, minor, threadId) {
@@ -578,6 +873,9 @@ export default class App {
       // Wait briefly for the tab switch to render the component
       await new Promise(r => requestAnimationFrame(r));
       this.positionView?.load(major, minor, threadId);
+      this._recordUserAction('position-open',
+        { major, minor, threadId },
+        `Position → ${this._toHex(major)}:${this._toHex(minor)}`);
     }
 
     async _fetchThreads() {
@@ -771,6 +1069,8 @@ export default class App {
       this.state.activeThreadId = threadId;
       this._renderTimelineThreadsMeta();
       this.handleTimeCommit(this.state.currentTime);
+      this._recordUserAction('thread-select',
+        { threadId }, `Thread → ${threadId}`);
     };
     this.timeline.onTimeChange = (time) => this.handleTimePreview(time);
     this.timeline.onTimeCommit = (time) => this.handleTimeCommit(time);
@@ -793,6 +1093,10 @@ export default class App {
     this.controls.onStep = (direction) => this.stepTime(direction);
     this.controls.onZoom = (direction) => this.handleZoomControl(direction);
     this.controls.onViewToggle = (view, enabled) => this.handleViewToggle(view, enabled);
+    this.controls.onReplayKey = (action) => {
+      if (action === 'advance') this._player?.advance();
+      else if (action === 'retreat') this._player?.retreat();
+    };
 
       // Memory page view (text list in right dock)
       const pageContainer = document.getElementById('page-canvas');
@@ -803,13 +1107,24 @@ export default class App {
     const commandContainer = document.getElementById('command-workspace');
     if (commandContainer) {
       this.commandConsole = new CommandConsole(commandContainer);
-      this.commandConsole.onExecute = (command) => this.executeWindbgCommand(command);
+      this.commandConsole.onExecute = async (command) => {
+        const result = await this.executeWindbgCommand(command);
+        this._recordUserAction('command',
+          { commandText: command }, `Command: ${command.substring(0, 60)}`);
+        return result;
+      };
     }
 
     const functionContainer = document.getElementById('function-workspace');
     if (functionContainer) {
       this.functionCallBrowser = new FunctionCallBrowser(functionContainer);
-      this.functionCallBrowser.onSearch = (target) => this.searchFunctionCalls(target);
+      this.functionCallBrowser.onSearch = async (target) => {
+        const result = await this.searchFunctionCalls(target);
+        this._recordUserAction('search',
+          { searchQuery: target, category: 'function-calls' },
+          `Function-call search: "${target}"`);
+        return result;
+      };
       this.functionCallBrowser.onEventSelect = (event) => this.jumpToFunctionCallEvent(event);
       this.functionCallBrowser.onJumpToEvent = (event) => this.jumpToFunctionCallEvent(event);
       this.functionCallBrowser.onSyncEvents = (events) => this.syncFunctionEventsToTimeline(events);
@@ -855,7 +1170,13 @@ export default class App {
     const stringsContainer = document.getElementById('strings-workspace');
     if (stringsContainer) {
       this.stringsView = new StringsView(stringsContainer);
-      this.stringsView.onSearch = async ({ query, limit }) => this._searchStrings(query, limit);
+      this.stringsView.onSearch = async ({ query, limit }) => {
+        const result = await this._searchStrings(query, limit);
+        this._recordUserAction('search',
+          { searchQuery: query, category: 'strings' },
+          `String search: "${query}"`);
+        return result;
+      };
       this.stringsView.onViewSvg = (address) => this._openMemoryLayoutPageSvg(address);
       this.stringsView.setDisconnected();
     }
@@ -863,8 +1184,19 @@ export default class App {
     const memaccessContainer = document.getElementById('memaccess-workspace');
     if (memaccessContainer) {
       this.memaccessView = new MemAccessView(memaccessContainer);
-      this.memaccessView.onSearch = async (params) =>
-        this._searchMemAccess(params);
+      this.memaccessView.onSearch = async (params) => {
+        const result = await this._searchMemAccess(params);
+        this._recordUserAction('mem-access',
+          {
+            startAddr: params.startAddr,
+            endAddr: params.endAddr,
+            mode: params.mode,
+            timeStartPct: params.timeStartPct,
+            timeEndPct: params.timeEndPct,
+          },
+          `Mem-access ${params.mode} ${params.startAddr}–${params.endAddr} [${params.timeStartPct}–${params.timeEndPct}%]`);
+        return result;
+      };
       this.memaccessView.onClickPosition = (major, minor, threadId) =>
         this._openPosition(major, minor, threadId);
       this.memaccessView.setDisconnected();
@@ -881,8 +1213,12 @@ export default class App {
       this.flamegraphView.onGetActiveThreadId = () => this.state.activeThreadId;
       this.flamegraphView.onFetchCallstacks = async ({ positions, threadId }) =>
         this._fetchCallstacksAtPositions(positions, threadId);
-      this.flamegraphView.onClickFrame = (start, end, mode) =>
-        this._openMemAccessRange(start, end, mode);
+      this.flamegraphView.onClickFrame = (start, end, mode) => {
+        this._recordUserAction('flamegraph',
+          { start, end, mode },
+          'Flame Graph');
+        this._openMemAccessRange(start, end, mode, { record: false });
+      };
       this.flamegraphView.setDisconnected();
     }
 
@@ -890,6 +1226,8 @@ export default class App {
     if (queueContainer) {
       this.queueView = new QueueView(queueContainer);
       this.queueView.onGetState = () => this.apiClient.dumpQueueState();
+      this.queueView.onExport = () => this._exportStoryline();
+      this.queueView.onLoadStoryline = (archive) => this.loadStorylineArchive(archive);
       this.queueView.setDisconnected();
     }
 
@@ -967,7 +1305,10 @@ export default class App {
       }
       button.addEventListener('click', () => {
         if (button.disabled) return;
-        this.setActiveTab(button.dataset.tabTarget);
+        const target = button.dataset.tabTarget;
+        this.setActiveTab(target);
+        this._recordUserAction('tab-switch',
+          { tabTarget: target }, `Tab → "${target}"`);
       });
     });
 
@@ -1109,6 +1450,9 @@ export default class App {
     this.updateRegistersAtTime(this.state.currentTime, positionOverride);
     this.updateCallstackAtTime(this.state.currentTime, positionOverride);
     this.updatePageAtTime(this.state.currentTime, positionOverride);
+    // Timeline seek is no longer recorded as its own step. The seek's
+    // API responses (registers, callstack, page render) are absorbed into
+    // the recording buffer and become part of the next user action's step.
   }
 
   getCurrentTracePosition(positionOverride = null) {
@@ -1236,6 +1580,8 @@ export default class App {
     } catch (err) {
       this.notificationBar?.show(`Page render: ${err.message}`, 'error');
     }
+    this._recordUserAction('page-navigate',
+      { address }, `Page → ${this.toDisplayAddress(address)}`);
   }
 
   getPageSvgTheme() {
@@ -1396,6 +1742,8 @@ export default class App {
     this.state.selectedAddress = address;
     this.updateInfoPanel();
     this.controls.updateHexDump(address, this.state.memoryData);
+    this._recordUserAction('address-click',
+      { address }, `Address → ${this.toDisplayAddress(address)}`);
   }
 
   handleZoomControl(direction) {
@@ -1551,6 +1899,18 @@ export default class App {
     if (spEl) {
       spEl.textContent = this.latestRegisters?.rsp ?? '--';
     }
+  }
+
+  _exportStoryline() {
+    if (!this._recorder) return;
+    const archive = this._recorder.downloadArchive(
+      this.state.traceInfo,
+      this._recorder._name,
+    );
+    this.notificationBar.show(
+      `Storyline exported: ${archive.stepCount} steps, ${archive.requestCount} requests`,
+      'info',
+    );
   }
 
   handleResize() {
