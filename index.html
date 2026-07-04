@@ -1556,8 +1556,22 @@
         font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
         font-weight: 700; color: #7ab890;
       }
+      .q-view-toolbar-right {
+        display: flex; align-items: center; gap: 8px; margin-left: auto;
+      }
+      .q-view-toolbar-btn {
+        font-family: inherit; font-size: 11px;
+        padding: 4px 12px;
+        background: linear-gradient(135deg, #2d7045, #3d9060);
+        border: 1px solid rgba(122, 184, 144, 0.6);
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        transition: filter 120ms ease;
+      }
+      .q-view-toolbar-btn:hover { filter: brightness(1.15); }
       .q-view-toolbar-subtitle {
-        font-size: 10px; color: #4a6a5a; margin-left: auto;
+        font-size: 10px; color: #4a6a5a;
       }
       .q-view-body {
         position: absolute; top: 36px; bottom: 0; left: 0; right: 0;
@@ -1630,6 +1644,99 @@
       .q-view-status-cancelled { color: #8a7a40; }
 
       .q-view-hist-row:hover { background: rgba(90, 145, 110, 0.06); }
+
+      /* --- ReplayBar (always-visible step control in replay mode) --- */
+      #replay-bar {
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 1100;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: linear-gradient(180deg, rgba(20, 32, 24, 0.96), rgba(12, 20, 14, 0.96));
+        border: 1px solid rgba(122, 184, 144, 0.55);
+        border-radius: 8px;
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55), inset 0 0 1px rgba(130, 220, 160, 0.08);
+        color: #c8e6c9;
+        font-family: 'Consolas', monospace;
+        font-size: 12px;
+        user-select: none;
+      }
+      #replay-bar.visible { display: inline-flex; }
+      .replay-bar-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #7ab890;
+        font-weight: 700;
+        margin-right: 4px;
+      }
+      .replay-bar-step {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
+      }
+      .replay-bar-counter {
+        font-size: 12px;
+        color: #d0ffe0;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .replay-bar-desc {
+        color: #a0d8b0;
+        font-size: 11px;
+        max-width: 320px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .replay-bar-spacer {
+        width: 1px;
+        height: 22px;
+        background: rgba(122, 184, 144, 0.25);
+        margin: 0 4px;
+      }
+      .replay-bar-btn {
+        font-family: inherit;
+        font-size: 11px;
+        padding: 5px 10px;
+        background: linear-gradient(135deg, #2d7045, #3d9060);
+        border: 1px solid rgba(122, 184, 144, 0.6);
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        transition: filter 120ms ease, opacity 120ms ease;
+      }
+      .replay-bar-btn:hover:not(:disabled) { filter: brightness(1.15); }
+      .replay-bar-btn:disabled { opacity: 0.4; cursor: default; }
+      .replay-bar-btn-reset {
+        background: linear-gradient(135deg, #444, #5a5a5a);
+        border-color: rgba(180, 180, 180, 0.4);
+      }
+      .replay-bar-dropzone {
+        position: fixed;
+        inset: 0;
+        z-index: 1200;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(10, 20, 14, 0.7);
+        backdrop-filter: blur(2px);
+        color: #c8e6c9;
+        font-family: 'Consolas', monospace;
+        font-size: 22px;
+        pointer-events: none;
+      }
+      .replay-bar-dropzone.visible { display: flex; }
+      .replay-bar-dropzone-inner {
+        padding: 28px 36px;
+        border: 2px dashed rgba(122, 184, 144, 0.7);
+        border-radius: 12px;
+        background: rgba(20, 32, 24, 0.85);
+      }
 
       /* --- MemAccess: clickable rows --- */
       .ma-row { cursor: pointer; }
@@ -6272,6 +6379,24 @@
 
         <!-- Notification Bar (non-blocking toasts) -->
         <div id="notification-bar"></div>
+
+        <!-- ReplayBar: always-visible step control (only rendered in replay mode) -->
+        <div id="replay-bar" aria-label="Storyline replay controls">
+          <span class="replay-bar-title">REPLAY</span>
+          <button class="replay-bar-btn" id="replay-bar-prev" type="button" title="Previous step (Shift+Space)">◀ Prev</button>
+          <span class="replay-bar-step">
+            <span class="replay-bar-counter" id="replay-bar-counter">0/0</span>
+            <span class="replay-bar-desc" id="replay-bar-desc">—</span>
+          </span>
+          <button class="replay-bar-btn" id="replay-bar-next" type="button" title="Next step (Space)">Next ▶</button>
+          <span class="replay-bar-spacer"></span>
+          <button class="replay-bar-btn replay-bar-btn-reset" id="replay-bar-reset" type="button" title="Reset to start">⟲ Reset</button>
+        </div>
+
+        <!-- Drag-drop overlay shown while user drags a .storyline.json onto the page -->
+        <div id="replay-dropzone" class="replay-bar-dropzone" aria-hidden="true">
+          <div class="replay-bar-dropzone-inner">Drop a .storyline.json archive to enter replay mode</div>
+        </div>
     </div>
   </div>
 
