@@ -425,7 +425,17 @@ export default class ApiClient {
 
   async _fetchWithTimeout(url, requestId, timeoutMs, _queueSignal = null) {
     if (this._mockResponseMap) {
-      const entry = this._mockResponseMap[url];
+      // Normalise to path+search so both relative ('/api/…?q=1') and
+      // absolute ('http://host/api/…?q=1') URLs match the stored entries,
+      // while still preserving query-string differentiation (e.g. PE bases).
+      let lookupKey;
+      try {
+        const parsed = new URL(url, 'http://localhost');
+        lookupKey = parsed.pathname + parsed.search;
+      } catch {
+        lookupKey = url;
+      }
+      const entry = this._mockResponseMap[lookupKey] ?? this._mockResponseMap[url];
       if (entry !== undefined) {
         const bodyText = entry.responseType === 'text'
           ? (entry.responseText ?? '')
