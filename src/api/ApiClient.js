@@ -413,7 +413,33 @@ export default class ApiClient {
     throw lastError;
   }
 
+  /**
+   * Install a map of pre-recorded responses for replay mode.
+   * Keys are full URL paths (e.g. '/api/ttd/trace-info'); values are
+   * storyline request objects with `status`, `responseBody`, `responseText`,
+   * and `responseType` fields.
+   */
+  installMockResponses(responseMap) {
+    this._mockResponseMap = responseMap;
+  }
+
   async _fetchWithTimeout(url, requestId, timeoutMs, _queueSignal = null) {
+    if (this._mockResponseMap) {
+      const entry = this._mockResponseMap[url];
+      if (entry !== undefined) {
+        const bodyText = entry.responseType === 'text'
+          ? (entry.responseText ?? '')
+          : JSON.stringify(entry.responseBody ?? {});
+        return new Response(bodyText, {
+          status: entry.status ?? 200,
+          headers: { 'Content-Type': entry.responseType === 'text' ? 'text/plain' : 'application/json' },
+        });
+      }
+      return new Response(
+        '{"error":{"code":"NOT_FOUND","message":"Endpoint not in storyline"}}',
+        { status: 404 },
+      );
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {

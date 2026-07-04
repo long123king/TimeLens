@@ -148,6 +148,39 @@ export default class App {
     this.state.events = [];
   }
 
+  /**
+   * Enter replay mode using a pre-recorded storyline archive.
+   * Stops the live connection monitor, installs mock responses from all
+   * recorded steps, then simulates a successful connection so the full
+   * data-fetch flow (trace info, modules, threads, …) runs against the
+   * recorded data and populates the HomeView.
+   */
+  loadStorylineArchive(archive) {
+    if (!archive?.steps?.length) return;
+
+    // Build a response map keyed by full API path (first occurrence wins so
+    // the earliest — typically the init step — takes precedence).
+    const responseMap = {};
+    for (const step of archive.steps) {
+      for (const req of (step.requests ?? [])) {
+        if (req.path && !(req.path in responseMap)) {
+          responseMap[req.path] = req;
+        }
+      }
+    }
+
+    // Stop polling the real server; we're running from recorded data.
+    this.connectionMonitor.stop();
+
+    // Route all ApiClient requests through the recorded responses.
+    this.apiClient.installMockResponses(responseMap);
+
+    // Trigger the normal connection flow so HomeView and all other views
+    // receive their data exactly as they would from a live server.
+    const serverData = responseMap['/api/server/status']?.responseBody ?? null;
+    this._handleConnectionChange(true, serverData);
+  }
+
     // ---------- Phase 1 connection handling ----------------------------------
 
     _handleConnectionChange(connected, serverData) {
