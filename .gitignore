@@ -12,4 +12,6 @@ WindowsTerminal.exe_page_*.svg
 *.etl
 *.evtx
 *.md
-!README.md未命名/
+!README.md
+!DEPLOY.md
+未命名/
