@@ -24,7 +24,7 @@ export default class MemoryPageSvgView {
 
     // dk.dll CoordinatesManager constants
     this._GW = 40; this._GH = 30; this._AW = 220; this._OX = 100; this._OY = 100;
-    this._zoomScale = 1.0;
+    this._zoomScale = 1.5;
     this._buildShell();
   }
 
@@ -83,8 +83,8 @@ export default class MemoryPageSvgView {
       '    </form>',
       '    <span id="mp-page-info" class="mp-page-info"></span>',
       '    <div class="mp-toolbar-spacer"></div>',
-      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.0\u00D7</span>',
-      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1">',
+      '    <span id="mp-zoom-label" class="mp-zoom-label" title="Click to reset zoom">1.50\u00D7</span>',
+      '    <input id="mp-zoom-slider" class="mp-zoom-slider" type="range" min="1" max="2" step="0.01" value="1.5">',
       '    <button id="mp-btn-theme" class="mp-btn small" type="button">\u263E</button>',
       '  </div>',
       '  <div id="mp-history-row" class="mp-history-row"></div>',

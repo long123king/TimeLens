@@ -4,13 +4,11 @@ TimeLens is a PixiJS + Vite frontend for exploring live WinDbg extension data, w
 
 ## Demo
 
-Preview (renders inline on GitHub):
+A live, browser-only demo is available — no WinDbg or dk server required:
 
-![TimeLens Demo](demo/demo.gif)
+**https://long123king.github.io/TimeLens/?demo=1**
 
-Open full GIF file:
-
-- [demo/demo.gif](demo/demo.gif)
+The demo loads captured HTTP fixtures in the browser so anyone can explore the UI. The full source for the demo lives under `demo/`; see [`demo/README.md`](demo/README.md) for setup, run, capture (against a real WinDbg + dk session), and deploy instructions.
 
 ## Current Status
 

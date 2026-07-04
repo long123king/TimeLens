@@ -7,7 +7,7 @@ const PAGE_SIZE = 0x1000n;
 
 const TYPE_COLORS = {
   module: '#3db8b0',
-  stack: '#e76f51',
+  stack: '#e83e8c',
   heap: '#8ab17d',
   teb: '#577590',
   peb: '#bc6c25',
@@ -51,7 +51,6 @@ export default class MemoryLayoutView {
     this._col2SelectedIndex = -1;
     this._col3Items = [];
     this._col3SelectedIndex = -1;
-    this._pagesPerCell = 1;
     this._selectedPageAddress = null;
     this._targetModuleBase = null;
     this._pageContent = null;
@@ -577,7 +576,7 @@ export default class MemoryLayoutView {
     for (let i = 0; i < this._col3Items.length; i += 1) {
       const section = this._col3Items[i];
       const perm = section.perm || 'rw';
-      const color = PERM_COLORS[perm] || TYPE_COLORS.other;
+      const color = PERM_COLORS[perm] || TYPE_COLORS[perm] || TYPE_COLORS.other;
 
       const item = document.createElement('button');
       item.className = 'mly-sect-item';
@@ -624,50 +623,19 @@ export default class MemoryLayoutView {
     }
 
     const totalPages = this._regionPageCount(region);
-    const cellCount = Math.ceil(totalPages / this._pagesPerCell);
 
     header.innerHTML = [
       `<div class="mly-col-title">Page Maps · ${this._esc(region.label)}</div>`,
-      `<div class="mly-col-meta">${this._fmtNum(totalPages)} pages · ${this._fmtNum(this._pagesPerCell)} ppc · ${this._fmtNum(cellCount)} cells</div>`
+      `<div class="mly-col-meta">${this._fmtNum(totalPages)} pages</div>`
     ].join('');
     target.appendChild(header);
-
-    const controls = document.createElement('div');
-    controls.className = 'mly-grid-controls';
-
-    const zoomOut = document.createElement('button');
-    zoomOut.className = 'mly-btn';
-    zoomOut.textContent = 'More Detail';
-    zoomOut.disabled = this._pagesPerCell <= 1;
-    zoomOut.addEventListener('click', () => {
-      this._pagesPerCell = Math.max(1, Math.floor(this._pagesPerCell / 4));
-      this._render();
-    });
-
-    const zoomIn = document.createElement('button');
-    zoomIn.className = 'mly-btn';
-    zoomIn.textContent = 'More Compression';
-    zoomIn.disabled = cellCount <= 512;
-    zoomIn.addEventListener('click', () => {
-      this._pagesPerCell = this._pagesPerCell * 4;
-      this._render();
-    });
-
-    const mode = document.createElement('span');
-    mode.className = 'mly-grid-mode';
-    mode.textContent = this._pagesPerCell === 1 ? 'Page granularity' : `Grouped (${this._pagesPerCell} ppc)`;
-
-    controls.appendChild(zoomOut);
-    controls.appendChild(zoomIn);
-    controls.appendChild(mode);
-    target.appendChild(controls);
 
     const grid = document.createElement('div');
     grid.className = 'mly-page-grid';
     this._col5GridEl = grid;
 
     const maxCells = 3500;
-    const renderCells = Math.min(cellCount, maxCells);
+    const renderCells = Math.min(totalPages, maxCells);
     for (let i = 0; i < renderCells; i += 1) {
       const cell = document.createElement('div');
       cell.className = 'mly-page-cell';
@@ -676,12 +644,11 @@ export default class MemoryLayoutView {
         ? this._sectionColor(section)
         : this._regionColor(region.type);
 
-      const startPage = i * this._pagesPerCell;
-      const endPage = Math.min(totalPages - 1, startPage + this._pagesPerCell - 1);
-      const startAddr = region.base + BigInt(startPage) * PAGE_SIZE;
-      const endAddr = this._minBig(region.end, startAddr + BigInt(this._pagesPerCell) * PAGE_SIZE - 1n);
+      const page = i;
+      const startAddr = region.base + BigInt(page) * PAGE_SIZE;
+      const endAddr = this._minBig(region.end, startAddr + PAGE_SIZE - 1n);
       const selectedPageAddr = this._alignPageAddress(this._selectedPageAddress ?? region.base);
-      if (selectedPageAddr >= startAddr && selectedPageAddr <= endAddr) {
+      if (selectedPageAddr === startAddr) {
         cell.classList.add('selected');
       }
       cell.dataset.pageStart = startAddr.toString();
@@ -689,17 +656,13 @@ export default class MemoryLayoutView {
 
       cell.title = [
         `${this._regionLabel(region.type)}: ${region.label}`,
-        `Pages: ${this._fmtNum(startPage)} - ${this._fmtNum(endPage)}`,
+        `Page: ${this._fmtNum(page)}`,
         `Addr: ${this._addrStr(startAddr)} - ${this._addrStr(endAddr)}`
       ].join('\n');
 
       const text = document.createElement('span');
       text.className = 'mly-page-cell-label';
-      if (this._pagesPerCell === 1) {
-        text.textContent = this._fmtNum(startPage);
-      } else {
-        text.textContent = `${this._fmtNum(startPage)}-${this._fmtNum(endPage)}`;
-      }
+      text.textContent = this._fmtNum(page);
       cell.appendChild(text);
       cell.addEventListener('click', () => {
         this._selectedPageAddress = this._alignPageAddress(startAddr);
@@ -710,10 +673,10 @@ export default class MemoryLayoutView {
       grid.appendChild(cell);
     }
 
-    if (cellCount > maxCells) {
+    if (totalPages > maxCells) {
       const note = document.createElement('div');
       note.className = 'mly-grid-note';
-      note.textContent = `Showing first ${this._fmtNum(maxCells)} cells. Increase compression to view whole region.`;
+      note.textContent = `Showing first ${this._fmtNum(maxCells)} pages. The full range has ${this._fmtNum(totalPages)} pages.`;
       target.appendChild(note);
     }
 
@@ -828,7 +791,6 @@ export default class MemoryLayoutView {
     this._col2SelectedIndex = index;
     const item = this._col2Items[index];
     this._selectedPageAddress = this._alignPageAddress(item.base);
-    this._pagesPerCell = this._suggestPagesPerCell(item);
     this._pageContent = null;
     this._pageError = '';
 
@@ -852,7 +814,6 @@ export default class MemoryLayoutView {
 
     this._col3SelectedIndex = index;
     const section = this._col3Items[index];
-    this._pagesPerCell = this._suggestPagesPerCell(section);
     this._selectedPageAddress = this._alignPageAddress(section.base);
     this._pageContent = null;
     this._pageError = '';
@@ -1123,6 +1084,7 @@ export default class MemoryLayoutView {
 
   _sectionColor(section) {
     if (section?.perm && PERM_COLORS[section.perm]) return PERM_COLORS[section.perm];
+    if (section?.perm && TYPE_COLORS[section.perm]) return TYPE_COLORS[section.perm];
     if (section?.type && TYPE_COLORS[section.type]) return TYPE_COLORS[section.type];
     return TYPE_COLORS.other;
   }
@@ -1149,16 +1111,6 @@ export default class MemoryLayoutView {
   _alignPageAddress(address) {
     if (typeof address !== 'bigint') return 0n;
     return address & (~(PAGE_SIZE - 1n));
-  }
-
-  _suggestPagesPerCell(region) {
-    if (!region) return 1;
-    const pages = this._regionPageCount(region);
-    let ppc = 1;
-    while (Math.ceil(pages / ppc) > 1800) {
-      ppc *= 4;
-    }
-    return ppc;
   }
 
   _regionPageCount(region) {

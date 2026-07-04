@@ -207,6 +207,26 @@ export default class ApiClient {
     return this._request(`/page/render?${parts.join('&')}`, { maxRetries: 0, timeoutMs: 10000, dedupe: false });
   }
 
+  // Code-page render: returns bytes + disasm only, no annotations.
+  // The frontend is expected to have already determined the page type
+  // (via PE-section inspection) before calling this.
+  getPageRenderCode({ major, minor, threadId, address } = {}) {
+    const parts = [];
+    if (major != null) { parts.push(`major=${encodeURIComponent(String(major))}`); parts.push(`minor=${encodeURIComponent(String(minor ?? 0))}`); }
+    if (threadId != null) { parts.push(`thread_id=${encodeURIComponent(String(threadId))}`); parts.push(`threadId=${encodeURIComponent(String(threadId))}`); }
+    if (address) parts.push(`address=${encodeURIComponent(String(address))}`);
+    return this._request(`/page/render/code?${parts.join('&')}`, { maxRetries: 0, timeoutMs: 10000, dedupe: false });
+  }
+
+  // Data-page render: returns bytes + annotations only, no disasm.
+  getPageRenderData({ major, minor, threadId, address } = {}) {
+    const parts = [];
+    if (major != null) { parts.push(`major=${encodeURIComponent(String(major))}`); parts.push(`minor=${encodeURIComponent(String(minor ?? 0))}`); }
+    if (threadId != null) { parts.push(`thread_id=${encodeURIComponent(String(threadId))}`); parts.push(`threadId=${encodeURIComponent(String(threadId))}`); }
+    if (address) parts.push(`address=${encodeURIComponent(String(address))}`);
+    return this._request(`/page/render/data?${parts.join('&')}`, { maxRetries: 0, timeoutMs: 10000, dedupe: false });
+  }
+
   getMemory({ start, end } = {}) {
     return this._request(`/memory?start=${encodeURIComponent(String(start ?? '0x0'))}&end=${encodeURIComponent(String(end ?? '0xFFFFFFFFFFFFFFFF'))}`, { maxRetries: 0, timeoutMs: 60000, dedupe: false });
   }
