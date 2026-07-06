@@ -41,6 +41,7 @@ export default class ApiClient {
     this._recording = true;
     this._recordingBuffer = []; // [{ path, status, duration, responseBody, responseText }]
     this._interceptor = null;   // StorylineInterceptor instance for replay mode
+    this._warnedUrls = new Set(); // dedup "no fixture" warnings in replay mode
   }
 
   drainRecordingBuffer() {
@@ -51,6 +52,9 @@ export default class ApiClient {
 
   setInterceptor(interceptor) {
     this._interceptor = interceptor || null;
+    // Reset the warned-URL set whenever the interceptor changes so a fresh
+    // storyline (or returning to live mode) gets a clean slate.
+    this._warnedUrls.clear();
   }
 
   /**
@@ -456,6 +460,18 @@ export default class ApiClient {
           headers: { 'content-type': fixture.contentType || 'application/json' },
         });
       }
+      // Replay mode: the interceptor is active but had no fixture for this
+      // URL. Rather than 404-ing against the static host, return an empty
+      // 200 and log a single deduped warning so missing fixtures show up in
+      // the console instead of as raw network failures.
+      if (!this._warnedUrls.has(url)) {
+        this._warnedUrls.add(url);
+        console.warn(`[ApiClient] replay: no fixture for ${url} — returning empty payload`);
+      }
+      return new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);

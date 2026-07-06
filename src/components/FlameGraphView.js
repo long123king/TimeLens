@@ -25,6 +25,11 @@ export default class FlameGraphView {
     this.onGetThreads = null;        // () => [{ threadId }]
     this.onGetThreadLifetimes = null; // () => Map<threadId, { start: {major,minor}, end: {major,minor} }>
     this.onFetchCallstacks = null;   // async ({ positions, threadId }) => [{ frames }]
+    this.onFetchAllThreadFrames = null; // async (threadId) => [{ frames: [...] }, ...]
+                                          // Used in replay mode to read recorded
+                                          // callstack fixtures directly without
+                                          // per-position sampling. When set,
+                                          // Phase 2 bypasses _fetchInBatches.
     this.onClickFrame = null;        // (startAddr, endAddr, mode) => void
 
     // State
@@ -167,7 +172,24 @@ export default class FlameGraphView {
 
         let tree = null;
         let validSamples = 0;
-        if (positions.length > 0) {
+        let positionsCount = positions.length;
+        if (this.onFetchAllThreadFrames) {
+          // Replay-mode fast path: read every recorded callstack for this
+          // thread at once instead of computing per-position samples.
+          try {
+            const containers = await this.onFetchAllThreadFrames(tid) ?? [];
+            const valid = containers
+              .map(c => c?.frames)
+              .filter(f => Array.isArray(f) && f.length > 0);
+            validSamples = valid.length;
+            positionsCount = valid.length;
+            if (valid.length > 0) {
+              tree = this._buildTree(valid);
+            }
+          } catch (err) {
+            console.error('[FG] TID ' + tid + ' replay fetch error:', err);
+          }
+        } else if (positions.length > 0) {
           try {
             const stacks = await this._fetchInBatches(positions, tid, CONCURRENCY);
             const valid = stacks.filter(s => Array.isArray(s) && s.length > 0);
@@ -180,7 +202,7 @@ export default class FlameGraphView {
           }
         }
 
-        const entry = { tree, validSamples, range, positions: positions.length };
+        const entry = { tree, validSamples, range, positions: positionsCount };
         this._threadTrees.set(tid, entry);
         this._fetchProgress.done++;
         this._renderProgress();
@@ -250,7 +272,22 @@ export default class FlameGraphView {
 
       let tree = null;
       let validSamples = 0;
-      if (positions.length > 0) {
+      let positionsCount = positions.length;
+      if (this.onFetchAllThreadFrames) {
+        try {
+          const containers = await this.onFetchAllThreadFrames(tid) ?? [];
+          const valid = containers
+            .map(c => c?.frames)
+            .filter(f => Array.isArray(f) && f.length > 0);
+          validSamples = valid.length;
+          positionsCount = valid.length;
+          if (valid.length > 0) {
+            tree = this._buildTree(valid);
+          }
+        } catch (err) {
+          console.error('[FG] TID ' + tid + ' resume replay error:', err);
+        }
+      } else if (positions.length > 0) {
         try {
           const stacks = await this._fetchInBatches(positions, tid, CONCURRENCY);
           const valid = stacks.filter(s => Array.isArray(s) && s.length > 0);
@@ -263,7 +300,7 @@ export default class FlameGraphView {
         }
       }
 
-      const entry = { tree, validSamples, range, positions: positions.length };
+      const entry = { tree, validSamples, range, positions: positionsCount };
       this._threadTrees.set(tid, entry);
       this._fetchProgress.done++;
       this._renderProgress();

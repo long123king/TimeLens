@@ -404,6 +404,25 @@ export default class App {
     return true;
   }
 
+  _getRecordedCallstackFramesForThread(threadId) {
+    if (!this._storylineArchive?.steps?.length) return [];
+    const target = String(threadId);
+    const out = [];
+    for (const step of this._storylineArchive.steps) {
+      for (const req of (step?.requests ?? [])) {
+        if (!req?.path?.startsWith('/api/callstack?')) continue;
+        if (req.status < 200 || req.status >= 300) continue;
+        const m = /(?:^|&)(?:thread_id|threadId)=([^&]+)/.exec(req.path);
+        if (!m || decodeURIComponent(m[1]) !== target) continue;
+        const frames = req.responseBody?.frames;
+        if (Array.isArray(frames) && frames.length > 0) {
+          out.push(req.responseBody);
+        }
+      }
+    }
+    return out;
+  }
+
   _stripSpuriousTimelineSeeks(archive) {
     if (!archive?.steps?.length) return archive;
     const out = [];
@@ -431,9 +450,10 @@ export default class App {
     // how many progressive Search clicks the user did within it. When a
     // mem-access action follows a mem-access step, overwrite the last step
     // in place so the archive stores the final probe state.
-    if (type === 'mem-access' && this._recorder.steps.length > 0) {
-      const last = this._recorder.steps[this._recorder.steps.length - 1];
-      if (last.type === 'mem-access') {
+    if (type === 'mem-access') {
+      const last = this._recorder.getLastStep();
+      if (last?.type === 'mem-access') {
+        last._coalesced = true;
         try { await this.apiClient.waitForIdle(3000); } catch {}
         const requests = this.apiClient.drainRecordingBuffer();
         last.action = action;
@@ -444,11 +464,12 @@ export default class App {
         return;
       }
     }
+    const step = this._recorder.startStep(type, action, description);
     try {
       await this.apiClient.waitForIdle(3000);
     } catch {}
     const requests = this.apiClient.drainRecordingBuffer();
-    this._recorder.capture({ type, action, description, requests });
+    this._recorder.commitStep(step, requests);
   }
 
     // ---------- Phase 1 connection handling ----------------------------------
@@ -1219,6 +1240,10 @@ export default class App {
           'Flame Graph');
         this._openMemAccessRange(start, end, mode, { record: false });
       };
+      this.flamegraphView.onFetchAllThreadFrames =
+        async (threadId) => this._isReplayMode()
+          ? this._getRecordedCallstackFramesForThread(threadId)
+          : [];
       this.flamegraphView.setDisconnected();
     }
 
@@ -1227,7 +1252,10 @@ export default class App {
       this.queueView = new QueueView(queueContainer);
       this.queueView.onGetState = () => this.apiClient.dumpQueueState();
       this.queueView.onExport = () => this._exportStoryline();
-      this.queueView.onLoadStoryline = (archive) => this.loadStorylineArchive(archive);
+      this.queueView.onLoadStoryline = (archive, filename) => {
+        if (filename) this._enterReplayModeFromFile(archive, filename);
+        else this.loadStorylineArchive(archive);
+      };
       this.queueView.setDisconnected();
     }
 
@@ -1911,6 +1939,15 @@ export default class App {
       `Storyline exported: ${archive.stepCount} steps, ${archive.requestCount} requests`,
       'info',
     );
+  }
+
+  _enterReplayModeFromFile(archive, filename) {
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+    const target = `${base}/replay/${encodeURIComponent(filename)}`;
+    if (window.location.pathname !== target) {
+      window.history.replaceState(null, '', target);
+    }
+    this.loadStorylineArchive(archive);
   }
 
   handleResize() {

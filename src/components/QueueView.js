@@ -37,7 +37,7 @@ export default class QueueView {
     try {
       const text = await file.text();
       const archive = JSON.parse(text);
-      this.onLoadStoryline?.(archive);
+      this.onLoadStoryline?.(archive, file.name);
     } catch (err) {
       console.error('[QueueView] Failed to load storyline file:', err);
     }

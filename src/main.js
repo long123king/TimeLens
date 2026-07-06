@@ -2,6 +2,10 @@ import { Application } from 'pixi.js';
 import App from './core/App.js';
 import './styles/main.css';
 
+const BASE_URL = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+const DEPLOY_TARGET = typeof __DEPLOY_TARGET__ !== 'undefined' ? __DEPLOY_TARGET__ : 'dev';
+const BUNDLED_STORYLINE_NAME = 'storyline-1783342659893.storyline.json';
+
 let pendingArchive = null;
 const dropZone = () => document.getElementById('replay-dropzone');
 
@@ -55,28 +59,57 @@ function deliverArchive(archive) {
   }
 }
 
-const BUNDLED_STORYLINE_URL = `${import.meta.env.BASE_URL}storyline-1783155058679.storyline.json`;
+function getRelativePath() {
+  let p = window.location.pathname;
+  if (BASE_URL && p.startsWith(BASE_URL)) {
+    p = p.slice(BASE_URL.length) || '/';
+  }
+  return p;
+}
 
-async function tryLoadBundledStoryline() {
+function resolveMode() {
+  let relative = getRelativePath();
+
+  if (relative === '/replay') relative = '/replay/';
+
+  if (DEPLOY_TARGET === 'demo' && relative === '/') {
+    const target = `${BASE_URL}/replay/${BUNDLED_STORYLINE_NAME}`;
+    window.history.replaceState(null, '', target);
+    relative = `/replay/${BUNDLED_STORYLINE_NAME}`;
+  }
+
+  if (DEPLOY_TARGET === 'dev' && relative === '/') {
+    const target = `${BASE_URL}/capture`;
+    window.history.replaceState(null, '', target);
+    relative = '/capture';
+  }
+
+  if (relative.startsWith('/replay/')) {
+    return { mode: 'replay', storylinePath: relative.slice('/replay/'.length) };
+  }
+
+  return { mode: 'capture' };
+}
+
+async function loadStorylineFromUrl(url) {
   try {
-    const r = await fetch(BUNDLED_STORYLINE_URL, { cache: 'no-store' });
+    const r = await fetch(url, { cache: 'no-store' });
     if (!r.ok) {
-      console.info(`[main] Bundled storyline not present (HTTP ${r.status}); running in live mode.`);
+      console.info(`[main] Storyline not present at ${url} (HTTP ${r.status}); running in live mode.`);
       return;
     }
     const archive = await r.json();
     if (!archive || !Array.isArray(archive.steps)) {
-      console.warn('[main] Bundled storyline invalid (missing steps[]); ignoring.');
+      console.warn(`[main] Storyline at ${url} invalid (missing steps[]); running in live mode.`);
       return;
     }
-    console.log(`[main] Loaded bundled storyline: ${archive.stepCount} steps, ${archive.requestCount} requests.`);
+    console.log(`[main] Loaded storyline from ${url}: ${archive.stepCount} steps, ${archive.requestCount} requests.`);
     deliverArchive(archive);
   } catch (err) {
-    console.info('[main] No bundled storyline available; running in live mode.', err);
+    console.info(`[main] Failed to load storyline at ${url}; running in live mode.`, err);
   }
 }
 
-// Initialize the application
 async function init() {
   const loadingEl = document.getElementById('loading');
   loadingEl.classList.add('visible');
@@ -84,7 +117,6 @@ async function init() {
   installDragDrop();
 
   try {
-    // Create PixiJS application
     const pixiApp = new Application();
 
     await pixiApp.init({
@@ -96,24 +128,29 @@ async function init() {
       autoDensity: true,
     });
 
-    // Add canvas to DOM
     const canvasContainer = document.getElementById('pixi-canvas');
     canvasContainer.appendChild(pixiApp.canvas);
 
-    // Create main app controller
     const app = new App(pixiApp);
     window.__timelensApp = app;
-    if (pendingArchive) {
-      app.loadStorylineArchive(pendingArchive);
-      pendingArchive = null;
+
+    const resolved = resolveMode();
+    if (resolved.mode === 'replay') {
+      await loadStorylineFromUrl(`${BASE_URL}/${resolved.storylinePath}`);
     }
-    await app.initialize();
+
     if (pendingArchive) {
       app.loadStorylineArchive(pendingArchive);
       pendingArchive = null;
     }
 
-    // Handle window resize
+    await app.initialize();
+
+    if (pendingArchive) {
+      app.loadStorylineArchive(pendingArchive);
+      pendingArchive = null;
+    }
+
     window.addEventListener('resize', () => {
       pixiApp.renderer.resize(window.innerWidth, window.innerHeight);
       app.handleResize();
@@ -121,17 +158,11 @@ async function init() {
 
     loadingEl.classList.remove('visible');
 
-    // Auto-enter replay mode if a storyline is bundled with the deployment
-    // (e.g. /storyline-1783155058679.storyline.json under public/). When the
-    // file is absent (local dev against a real dk server) this is a no-op.
-    tryLoadBundledStoryline();
-
-    console.log('WinDbg Visualizer initialized successfully');
+    console.log(`WinDbg Visualizer initialized in ${resolved.mode} mode`);
   } catch (error) {
     console.error('Failed to initialize application:', error);
     document.getElementById('loading-text').textContent = `Error: ${error.message}`;
   }
 }
 
-// Start the application
 init();

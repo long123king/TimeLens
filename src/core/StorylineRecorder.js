@@ -5,6 +5,7 @@ export default class StorylineRecorder {
     this.apiClient = apiClient;
     this.startTime = Date.now();
     this.steps = [];
+    this._pendingSteps = [];
     this._name = 'storyline';
   }
 
@@ -21,6 +22,47 @@ export default class StorylineRecorder {
     };
     this.steps.push(step);
     return step;
+  }
+
+  startStep(type, action = null, description = '') {
+    const step = {
+      id: generateStepId(),
+      index: -1,
+      type,
+      timestamp: Date.now(),
+      relativeMs: Date.now() - this.startTime,
+      description,
+      action,
+      requests: null,
+      pending: true,
+      _coalesced: false,
+    };
+    this._pendingSteps.push(step);
+    return step;
+  }
+
+  commitStep(step, requests = []) {
+    if (!step._coalesced) {
+      step.requests = requests ?? [];
+    }
+    step.pending = false;
+    delete step._coalesced;
+    this._flushPending();
+  }
+
+  getLastStep() {
+    if (this._pendingSteps.length > 0) return this._pendingSteps[this._pendingSteps.length - 1];
+    if (this.steps.length > 0) return this.steps[this.steps.length - 1];
+    return null;
+  }
+
+  _flushPending() {
+    while (this._pendingSteps.length > 0 && !this._pendingSteps[0].pending) {
+      const step = this._pendingSteps.shift();
+      delete step.pending;
+      step.index = this.steps.length;
+      this.steps.push(step);
+    }
   }
 
   async captureInit() {

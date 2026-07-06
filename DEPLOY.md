@@ -15,7 +15,7 @@ There is no longer a separate `demo/` sub-project or `MockBackend`.
 
 The repo state you should see after the user syncs:
 
-- `public/storyline-1783155058679.storyline.json` exists (~25 MB, committed)
+- `public/storyline-1783342659893.storyline.json` exists (~25 MB, committed)
 - `.github/workflows/deploy-pages.yml` exists (new; replaces the old
   `deploy-demo.yml` which is **gone**)
 - `demo/`, `vite/`, `.github/workflows/deploy-demo.yml` are **deleted** from
@@ -29,7 +29,7 @@ You can verify any of these with the GitHub MCP / API:
 get_file_contents: index.html
 get_file_contents: src/main.js
 get_file_contents: .github/workflows/deploy-pages.yml
-get_file_contents: public/storyline-1783155058679.storyline.json   # ~25 MB
+get_file_contents: public/storyline-1783342659893.storyline.json   # ~25 MB
 list_directory: public
 list_directory: .github/workflows
 search_code: "/demo/src/main.js"   # should return zero matches in index.html
@@ -94,7 +94,7 @@ public URL: `https://long123king.github.io/TimeLens/`.
 
 - **`build` job**: `npm ci` (or `npm install`) → `npm run build`. Vite emits
   `dist/` containing `index.html`, `assets/`, and the bundled
-  `storyline-1783155058679.storyline.json`.
+  `storyline-1783342659893.storyline.json`.
 - **`deploy` job**: uploads `dist/` as the GitHub Pages artifact and
   publishes it. No errors.
 
@@ -116,7 +116,7 @@ Fetch `https://long123king.github.io/TimeLens/` and confirm:
   (Vite-built module).
 - The asset `<script>` is reachable: `GET /TimeLens/assets/index-*.js` → 200.
 - The storyline is reachable:
-  `GET /TimeLens/storyline-1783155058679.storyline.json` → 200,
+  `GET /TimeLens/storyline-1783342659893.storyline.json` → 200,
   `Content-Type: application/json`, body starts with `{"formatVersion":"2.0"`.
 
 Tell the user: open `https://long123king.github.io/TimeLens/` in a browser.
@@ -148,7 +148,7 @@ change and requires the user, not a deployment tweak.
 - Open the browser console. `[main] Loaded bundled storyline: 19 steps, ...`
   should print. If `[main] Bundled storyline not present (HTTP 404)` prints,
   the file isn't being served. Check the deploy artifact contents: `GET`
-  `https://long123king.github.io/TimeLens/storyline-1783155058679.storyline.json`.
+  `https://long123king.github.io/TimeLens/storyline-1783342659893.storyline.json`.
 - If HTTP 200 but the JSON fails to parse (e.g. truncated by a CDN), re-deploy.
 - If the user is hitting the URL with `?demo=1` from an old link, note that
   the param is ignored now — just remove it.
@@ -184,7 +184,7 @@ This is only a stop-gap. The intended steady state is the current refactor.
 
 - [ ] Confirm `demo/`, `vite/`, `.github/workflows/deploy-demo.yml` are
       absent from the `main` branch tip.
-- [ ] Confirm `public/storyline-1783155058679.storyline.json` and
+- [ ] Confirm `public/storyline-1783342659893.storyline.json` and
       `.github/workflows/deploy-pages.yml` are present.
 - [ ] Set Pages source to "GitHub Actions" if not already.
 - [ ] Trigger the `Deploy Pages` workflow (push or dispatch).
